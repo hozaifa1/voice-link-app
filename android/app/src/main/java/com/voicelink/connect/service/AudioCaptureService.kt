@@ -19,22 +19,36 @@ class AudioCaptureService : Service() {
 
     companion object {
         private const val TAG = "AudioCaptureService"
-        const val ACTION_START = "com.voicelink.connect.action.START_CAPTURE"
+        const val ACTION_START_FOREGROUND = "com.voicelink.connect.action.START_FOREGROUND"
+        const val ACTION_START_CAPTURE = "com.voicelink.connect.action.START_CAPTURE"
         const val ACTION_STOP = "com.voicelink.connect.action.STOP_CAPTURE"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         private const val NOTIFICATION_ID = 1001
 
-        fun startCapture(context: Context, resultCode: Int, data: Intent) {
+        var isRunning = false
+            private set
+
+        fun prepareCapture(context: Context) {
+            Log.d(TAG, "prepareCapture called")
             val serviceIntent = Intent(context, AudioCaptureService::class.java).apply {
-                action = ACTION_START
-                putExtra(EXTRA_RESULT_CODE, resultCode)
-                putExtra(EXTRA_RESULT_DATA, data)
+                action = ACTION_START_FOREGROUND
             }
             context.startForegroundService(serviceIntent)
         }
 
+        fun startCapture(context: Context, resultCode: Int, data: Intent) {
+            Log.d(TAG, "startCapture called with resultCode: $resultCode")
+            val serviceIntent = Intent(context, AudioCaptureService::class.java).apply {
+                action = ACTION_START_CAPTURE
+                putExtra(EXTRA_RESULT_CODE, resultCode)
+                putExtra(EXTRA_RESULT_DATA, data)
+            }
+            context.startService(serviceIntent)
+        }
+
         fun stopCapture(context: Context) {
+            Log.d(TAG, "stopCapture called")
             val serviceIntent = Intent(context, AudioCaptureService::class.java).apply {
                 action = ACTION_STOP
             }
@@ -48,7 +62,13 @@ class AudioCaptureService : Service() {
         Log.d(TAG, "onStartCommand: action=${intent?.action}")
         
         when (intent?.action) {
-            ACTION_START -> {
+            ACTION_START_FOREGROUND -> {
+                Log.d(TAG, "Starting foreground service (prepare phase)")
+                startForegroundService()
+                isRunning = true
+            }
+            ACTION_START_CAPTURE -> {
+                Log.d(TAG, "Received MediaProjection result, starting capture")
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
                 val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -58,14 +78,15 @@ class AudioCaptureService : Service() {
                 }
 
                 if (resultCode != -1 && resultData != null) {
-                    startForegroundService()
                     initializeCapture(resultCode, resultData)
                 } else {
-                    Log.e(TAG, "Invalid MediaProjection result")
+                    Log.e(TAG, "Invalid MediaProjection result: resultCode=$resultCode, data=$resultData")
+                    AudioCaptureManager.reset()
                     stopSelf()
                 }
             }
             ACTION_STOP -> {
+                Log.d(TAG, "Stop action received")
                 stopCapture()
                 stopSelf()
             }
@@ -149,6 +170,7 @@ class AudioCaptureService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")
+        isRunning = false
         stopCapture()
         super.onDestroy()
     }

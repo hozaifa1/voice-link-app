@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
+import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -53,9 +55,11 @@ fun AudioCaptureTestScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            // Start the foreground service with MediaProjection result
+            // Pass MediaProjection result to already-running foreground service
             AudioCaptureService.startCapture(context, result.resultCode, result.data!!)
         } else {
+            // User cancelled - stop the foreground service
+            AudioCaptureService.stopCapture(context)
             AudioCaptureManager.reset()
         }
     }
@@ -63,13 +67,11 @@ fun AudioCaptureTestScreen(
     // Permission launcher for notifications (Android 13+)
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { _ -> }
-
-    fun requestMediaProjection() {
-        val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) 
-            as MediaProjectionManager
-        AudioCaptureManager.requestMediaProjection()
-        mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+    ) { granted ->
+        if (granted) {
+            // Continue with capture after notification permission granted
+            initiateCapture(context, mediaProjectionLauncher)
+        }
     }
 
     fun startCapture() {
@@ -82,10 +84,11 @@ fun AudioCaptureTestScreen(
         // Check notification permission for Android 13+
         if (!PermissionHelper.hasNotificationPermission(context)) {
             notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            return
         }
 
-        // Request MediaProjection
-        requestMediaProjection()
+        // Initiate capture flow
+        initiateCapture(context, mediaProjectionLauncher)
     }
 
     fun stopCapture() {
@@ -443,4 +446,18 @@ private fun formatBytes(bytes: Long): String {
         bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
         else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
     }
+}
+
+private fun initiateCapture(
+    context: Context,
+    mediaProjectionLauncher: ManagedActivityResultLauncher<Intent, ActivityResult>
+) {
+    // Step 1: Start foreground service FIRST (required for Android 10+)
+    AudioCaptureService.prepareCapture(context)
+    
+    // Step 2: Request MediaProjection permission
+    AudioCaptureManager.requestMediaProjection()
+    val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) 
+        as MediaProjectionManager
+    mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
 }
