@@ -31,7 +31,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
+            // applicationIdSuffix removed to match google-services.json
             versionNameSuffix = "-debug"
         }
     }
@@ -83,6 +83,9 @@ dependencies {
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.auth)
+
+    // Accompanist
+    implementation(libs.accompanist.permissions)
 
     // Testing
     testImplementation(libs.junit)
