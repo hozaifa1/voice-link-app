@@ -62,6 +62,16 @@ object AudioCaptureManager {
         _captureState.value = CaptureState.WaitingForPermission
     }
 
+    /**
+     * Start mic-only capture without MediaProjection.
+     * Useful for testing on emulators.
+     */
+    fun startMicOnlyCapture(): Boolean {
+        Log.d(TAG, "startMicOnlyCapture() called")
+        mediaProjection = null  // Ensure no projection
+        return startCapture()
+    }
+
     fun onMediaProjectionResult(
         context: Context,
         resultCode: Int,
@@ -90,25 +100,29 @@ object AudioCaptureManager {
     }
 
     fun startCapture(): Boolean {
-        val projection = mediaProjection
-        if (projection == null) {
-            Log.e(TAG, "MediaProjection not available")
-            _captureState.value = CaptureState.Error("MediaProjection not available. Please grant permission.")
-            return false
-        }
-
+        Log.d(TAG, "startCapture() called, mediaProjection=$mediaProjection")
+        
         _captureState.value = CaptureState.Starting
-
+        
         try {
-            // Register MediaProjection callback for lifecycle events
-            projection.registerCallback(object : MediaProjection.Callback() {
+            val projection = mediaProjection
+            
+            // If we have MediaProjection, register callback
+            // Note: On emulators, onStop may be called immediately - we handle this gracefully
+            projection?.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
-                    Log.i(TAG, "MediaProjection stopped by system")
-                    stopCapture()
+                    Log.i(TAG, "MediaProjection.Callback.onStop() called")
+                    // Only stop if we're actually capturing, not if we're still starting
+                    if (_captureState.value == CaptureState.Capturing) {
+                        Log.i(TAG, "Stopping capture due to MediaProjection stop")
+                        stopCapture()
+                    } else {
+                        Log.w(TAG, "Ignoring onStop - not in Capturing state (state=${_captureState.value})")
+                    }
                 }
             }, null)
 
-            // Create and start HybridAudioSource
+            // Create audio source - will fall back to mic-only if no projection
             hybridAudioSource = HybridAudioSource(projection).apply {
                 onMixedPcmData = { data, length ->
                     pcmBytesProcessed += length
@@ -133,17 +147,23 @@ object AudioCaptureManager {
                 }
             }
 
+            Log.d(TAG, "Starting HybridAudioSource...")
             val started = hybridAudioSource?.start() == true
+            Log.d(TAG, "HybridAudioSource.start() returned: $started")
+            
             if (started) {
                 captureStartTime = System.currentTimeMillis()
                 pcmBytesProcessed = 0L
                 // Check if we're in mic-only mode
-                val isMicOnly = hybridAudioSource?.state?.value is HybridAudioSource.State.CapturingMicOnly
+                val sourceState = hybridAudioSource?.state?.value
+                Log.d(TAG, "HybridAudioSource state: $sourceState")
+                val isMicOnly = sourceState is HybridAudioSource.State.CapturingMicOnly
                 _captureState.value = if (isMicOnly) CaptureState.CapturingMicOnly else CaptureState.Capturing
-                Log.i(TAG, "Audio capture started (micOnly=$isMicOnly)")
+                Log.i(TAG, "Audio capture started successfully (micOnly=$isMicOnly)")
                 return true
             } else {
                 val errorMsg = hybridAudioSource?.lastError?.value ?: "Failed to start audio capture"
+                Log.e(TAG, "Failed to start: $errorMsg")
                 _captureState.value = CaptureState.Error(errorMsg)
                 return false
             }
@@ -186,7 +206,9 @@ object AudioCaptureManager {
     }
 
     private fun updateStats() {
-        val duration = if (captureStartTime > 0 && _captureState.value == CaptureState.Capturing) {
+        val isActive = _captureState.value == CaptureState.Capturing || 
+                       _captureState.value == CaptureState.CapturingMicOnly
+        val duration = if (captureStartTime > 0 && isActive) {
             System.currentTimeMillis() - captureStartTime
         } else {
             0L
@@ -195,7 +217,7 @@ object AudioCaptureManager {
         _captureStats.value = CaptureStats(
             durationMs = duration,
             bytesProcessed = pcmBytesProcessed,
-            isCapturing = _captureState.value == CaptureState.Capturing
+            isCapturing = isActive
         )
     }
 

@@ -74,8 +74,20 @@ fun AudioCaptureTestScreen(
         onRequestMediaProjection()
     }
 
+    fun startMicOnly() {
+        // Check audio permission first
+        if (!audioPermissionState.status.isGranted) {
+            audioPermissionState.launchPermissionRequest()
+            return
+        }
+        
+        // Start mic-only capture directly (no MediaProjection needed)
+        AudioCaptureManager.startMicOnlyCapture()
+    }
+
     fun stopCapture() {
         AudioCaptureService.stopCapture(context)
+        AudioCaptureManager.stopCapture()
     }
 
     Box(
@@ -127,12 +139,34 @@ fun AudioCaptureTestScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Control Button
+            // Control Buttons
             when (captureState) {
                 is AudioCaptureManager.CaptureState.Idle,
                 is AudioCaptureManager.CaptureState.Stopped,
                 is AudioCaptureManager.CaptureState.Error -> {
-                    StartButton(onClick = { startCapture() })
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StartButton(onClick = { startCapture() })
+                        
+                        // Test Mic Only button (no MediaProjection needed)
+                        OutlinedButton(
+                            onClick = { startMicOnly() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Mic,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Test Mic Only (No Screen Share)")
+                        }
+                    }
                 }
                 is AudioCaptureManager.CaptureState.Capturing,
                 is AudioCaptureManager.CaptureState.CapturingMicOnly -> {

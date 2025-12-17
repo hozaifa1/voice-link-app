@@ -32,7 +32,7 @@ import kotlin.math.min
  * On emulators where AudioPlaybackCapture fails, falls back to mic-only mode.
  */
 class HybridAudioSource(
-    private val mediaProjection: MediaProjection
+    private val mediaProjection: MediaProjection?
 ) {
     companion object {
         private const val TAG = "HybridAudioSource"
@@ -72,9 +72,10 @@ class HybridAudioSource(
             return true
         }
 
+        Log.d(TAG, "start() called, mediaProjection=$mediaProjection")
         _state.value = State.Starting
         _lastError.value = null
-        micOnlyMode = false
+        micOnlyMode = mediaProjection == null  // If no projection, start in mic-only mode
         scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
         try {
@@ -86,30 +87,42 @@ class HybridAudioSource(
             }
             Log.d(TAG, "Mic recorder initialized successfully")
 
-            // Try to initialize system audio recorder via AudioPlaybackCapture
-            try {
-                Log.d(TAG, "Creating system audio recorder...")
-                systemRecorder = createSystemRecorder()
-                if (systemRecorder?.state != AudioRecord.STATE_INITIALIZED) {
-                    throw IllegalStateException("System recorder state: ${systemRecorder?.state}")
+            // Try to initialize system audio recorder via AudioPlaybackCapture (only if we have MediaProjection)
+            if (mediaProjection != null) {
+                try {
+                    Log.d(TAG, "Creating system audio recorder...")
+                    systemRecorder = createSystemRecorder()
+                    if (systemRecorder?.state != AudioRecord.STATE_INITIALIZED) {
+                        throw IllegalStateException("System recorder state: ${systemRecorder?.state}")
+                    }
+                    Log.d(TAG, "System audio recorder initialized successfully")
+                    micOnlyMode = false
+                } catch (e: Exception) {
+                    // System audio capture failed - fall back to mic only
+                    Log.w(TAG, "System audio capture not available (likely emulator): ${e.message}")
+                    _lastError.value = "System audio not available: ${e.message}\nUsing mic-only mode."
+                    micOnlyMode = true
+                    systemRecorder?.release()
+                    systemRecorder = null
                 }
-                Log.d(TAG, "System audio recorder initialized successfully")
-            } catch (e: Exception) {
-                // System audio capture failed - fall back to mic only
-                Log.w(TAG, "System audio capture not available (likely emulator): ${e.message}")
-                _lastError.value = "System audio not available: ${e.message}\nUsing mic-only mode."
-                micOnlyMode = true
-                systemRecorder?.release()
-                systemRecorder = null
+            } else {
+                Log.d(TAG, "No MediaProjection, using mic-only mode")
+                _lastError.value = "No MediaProjection - using mic-only mode"
             }
 
             // Start recorders
+            Log.d(TAG, "Starting mic recorder...")
             micRecorder?.startRecording()
-            if (!micOnlyMode) {
+            Log.d(TAG, "Mic recording state: ${micRecorder?.recordingState}")
+            
+            if (!micOnlyMode && systemRecorder != null) {
+                Log.d(TAG, "Starting system recorder...")
                 systemRecorder?.startRecording()
+                Log.d(TAG, "System recording state: ${systemRecorder?.recordingState}")
             }
 
             // Start the capture loop
+            Log.d(TAG, "Starting capture loop...")
             startCaptureLoop()
 
             _state.value = if (micOnlyMode) State.CapturingMicOnly else State.Capturing
@@ -185,7 +198,8 @@ class HybridAudioSource(
 
     @SuppressLint("MissingPermission")
     private fun createSystemRecorder(): AudioRecord {
-        val playbackConfig = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+        val projection = mediaProjection ?: throw IllegalStateException("MediaProjection is null")
+        val playbackConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
