@@ -46,12 +46,28 @@ class MainActivity : ComponentActivity() {
         mediaProjectionLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
-            Log.d(TAG, "MediaProjection result: resultCode=${result.resultCode}")
+            Log.d(TAG, "MediaProjection result callback fired: resultCode=${result.resultCode}, data=${result.data}")
             pendingMediaProjection = false
             
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                Log.d(TAG, "MediaProjection granted, starting capture")
-                AudioCaptureService.startCapture(this, result.resultCode, result.data!!)
+                Log.d(TAG, "MediaProjection granted, initializing capture directly")
+                
+                // Get MediaProjection directly here instead of passing through service
+                val success = AudioCaptureManager.onMediaProjectionResult(this, result.resultCode, result.data!!)
+                Log.d(TAG, "onMediaProjectionResult returned: $success")
+                
+                if (success) {
+                    val captureStarted = AudioCaptureManager.startCapture()
+                    Log.d(TAG, "startCapture returned: $captureStarted")
+                    if (!captureStarted) {
+                        Log.e(TAG, "Failed to start capture")
+                        AudioCaptureService.stopCapture(this)
+                    }
+                } else {
+                    Log.e(TAG, "Failed to get MediaProjection")
+                    AudioCaptureService.stopCapture(this)
+                    AudioCaptureManager.reset()
+                }
             } else {
                 Log.d(TAG, "MediaProjection denied or cancelled")
                 AudioCaptureService.stopCapture(this)
