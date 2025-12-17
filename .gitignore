@@ -1,0 +1,19 @@
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Kotlin
+*.class
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

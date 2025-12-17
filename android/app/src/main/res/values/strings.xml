@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VoiceLink Connect</string>
+    <string name="notification_channel_name">Audio Sharing</string>
+    <string name="notification_channel_description">Notifications for audio sharing service</string>
+    <string name="notification_title">Audio Sharing Active</string>
+    <string name="notification_text">Sharing audio with connected peers</string>
+    <string name="stop_sharing">Stop Sharing</string>
+    <string name="start_sharing">Start Sharing</string>
+    <string name="join_room">Join Room</string>
+    <string name="create_room">Create Room</string>
+    <string name="room_code">Room Code</string>
+    <string name="enter_room_code">Enter room code</string>
+    <string name="connecting">Connecting…</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="permission_required">Permission Required</string>
+    <string name="audio_permission_rationale">Audio permission is required to share your voice with others.</string>
+    <string name="screen_capture_rationale">Screen capture permission is required to share audio from apps.</string>
+</resources>

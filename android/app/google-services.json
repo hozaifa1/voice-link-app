@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "871026045798",
+    "project_id": "voicelinkapp",
+    "storage_bucket": "voicelinkapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:871026045798:android:24166efa2794fa82abcea7",
+        "android_client_info": {
+          "package_name": "com.voicelink.connect"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBRuzMHDrN6pSll7SD1A2hQeWxw0YkRzgM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
