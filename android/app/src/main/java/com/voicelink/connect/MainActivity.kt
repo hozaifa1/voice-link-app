@@ -24,6 +24,7 @@ import com.voicelink.connect.service.AudioCaptureService
 import com.voicelink.connect.ui.theme.VoiceLinkTheme
 import com.voicelink.connect.ui.screens.AudioCaptureTestScreen
 import com.voicelink.connect.ui.screens.HomeScreen
+import com.voicelink.connect.ui.screens.RoomScreen
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -82,17 +83,24 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // For Step 4 testing: Show AudioCaptureTestScreen
-                    // TODO: Replace with proper navigation after Step 4 is verified
-                    var showAudioTest by remember { mutableStateOf(true) }
+                    // Navigation state for Step 5 WebRTC testing
+                    var currentScreen by remember { mutableStateOf("room") }
                     
-                    if (showAudioTest) {
-                        AudioCaptureTestScreen(
-                            onBackClick = { showAudioTest = false },
-                            onRequestMediaProjection = { requestMediaProjection() }
-                        )
-                    } else {
-                        HomeScreen()
+                    when (currentScreen) {
+                        "room" -> {
+                            RoomScreen(
+                                onBackClick = { currentScreen = "home" }
+                            )
+                        }
+                        "audio_test" -> {
+                            AudioCaptureTestScreen(
+                                onBackClick = { currentScreen = "room" },
+                                onRequestMediaProjection = { requestMediaProjection() }
+                            )
+                        }
+                        else -> {
+                            HomeScreen()
+                        }
                     }
                 }
             }
