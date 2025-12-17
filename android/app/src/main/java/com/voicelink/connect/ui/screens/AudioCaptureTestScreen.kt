@@ -46,6 +46,7 @@ fun AudioCaptureTestScreen(
     val captureState by AudioCaptureManager.captureState.collectAsState()
     val audioLevel by AudioCaptureManager.audioLevel.collectAsState()
     val captureStats by AudioCaptureManager.captureStats.collectAsState()
+    val warningMessage by AudioCaptureManager.warningMessage.collectAsState()
 
     // Audio permission state
     val audioPermissionState = rememberPermissionState(android.Manifest.permission.RECORD_AUDIO)
@@ -129,13 +130,18 @@ fun AudioCaptureTestScreen(
             // Audio Level Visualizer
             AudioLevelVisualizer(
                 level = audioLevel,
-                isCapturing = captureState is AudioCaptureManager.CaptureState.Capturing
+                isCapturing = captureState is AudioCaptureManager.CaptureState.Capturing ||
+                             captureState is AudioCaptureManager.CaptureState.CapturingMicOnly
             )
 
             Spacer(modifier = Modifier.height(32.dp))
 
             // Status Card
-            StatusCard(captureState = captureState, stats = captureStats)
+            StatusCard(
+                captureState = captureState, 
+                stats = captureStats,
+                warningMessage = warningMessage
+            )
 
             Spacer(modifier = Modifier.height(32.dp))
 
@@ -146,7 +152,8 @@ fun AudioCaptureTestScreen(
                 is AudioCaptureManager.CaptureState.Error -> {
                     StartButton(onClick = { startCapture() })
                 }
-                is AudioCaptureManager.CaptureState.Capturing -> {
+                is AudioCaptureManager.CaptureState.Capturing,
+                is AudioCaptureManager.CaptureState.CapturingMicOnly -> {
                     StopButton(onClick = { stopCapture() })
                 }
                 is AudioCaptureManager.CaptureState.Starting,
@@ -231,7 +238,8 @@ private fun AudioLevelVisualizer(
 @Composable
 private fun StatusCard(
     captureState: AudioCaptureManager.CaptureState,
-    stats: AudioCaptureManager.CaptureStats
+    stats: AudioCaptureManager.CaptureStats,
+    warningMessage: String? = null
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -255,7 +263,8 @@ private fun StatusCard(
                     is AudioCaptureManager.CaptureState.Idle -> "Ready" to MaterialTheme.colorScheme.outline
                     is AudioCaptureManager.CaptureState.WaitingForPermission -> "Waiting for permission..." to MaterialTheme.colorScheme.tertiary
                     is AudioCaptureManager.CaptureState.Starting -> "Starting..." to MaterialTheme.colorScheme.tertiary
-                    is AudioCaptureManager.CaptureState.Capturing -> "Capturing" to Color(0xFF4CAF50)
+                    is AudioCaptureManager.CaptureState.Capturing -> "Capturing (Mic + System)" to Color(0xFF4CAF50)
+                    is AudioCaptureManager.CaptureState.CapturingMicOnly -> "Capturing (Mic Only)" to Color(0xFFFF9800)
                     is AudioCaptureManager.CaptureState.Stopped -> "Stopped" to MaterialTheme.colorScheme.outline
                     is AudioCaptureManager.CaptureState.Error -> "Error" to MaterialTheme.colorScheme.error
                 }
@@ -286,8 +295,21 @@ private fun StatusCard(
                 )
             }
 
+            // Warning message (e.g., mic-only mode explanation)
+            if (warningMessage != null && captureState is AudioCaptureManager.CaptureState.CapturingMicOnly) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = warningMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFF9800),
+                    textAlign = TextAlign.Center
+                )
+            }
+
             // Stats when capturing
-            if (stats.isCapturing) {
+            val isCapturing = captureState is AudioCaptureManager.CaptureState.Capturing ||
+                             captureState is AudioCaptureManager.CaptureState.CapturingMicOnly
+            if (isCapturing) {
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                 Spacer(modifier = Modifier.height(16.dp))

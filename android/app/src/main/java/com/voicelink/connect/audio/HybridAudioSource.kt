@@ -28,6 +28,8 @@ import kotlin.math.min
  * 
  * Mixed PCM is available via callback for WebRTC or other consumers.
  * No audio is stored to disk.
+ * 
+ * On emulators where AudioPlaybackCapture fails, falls back to mic-only mode.
  */
 class HybridAudioSource(
     private val mediaProjection: MediaProjection
@@ -40,6 +42,7 @@ class HybridAudioSource(
         data object Idle : State()
         data object Starting : State()
         data object Capturing : State()
+        data object CapturingMicOnly : State()  // Fallback mode
         data class Error(val message: String) : State()
         data object Stopped : State()
     }
@@ -50,50 +53,72 @@ class HybridAudioSource(
     private val _audioLevel = MutableStateFlow(0f)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
 
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
+
     private var micRecorder: AudioRecord? = null
     private var systemRecorder: AudioRecord? = null
     private var captureJob: Job? = null
     private var scope: CoroutineScope? = null
+    private var micOnlyMode = false
 
     // Callback for mixed PCM data (for WebRTC)
     var onMixedPcmData: ((ByteArray, Int) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     fun start(): Boolean {
-        if (_state.value == State.Capturing) {
+        if (_state.value == State.Capturing || _state.value == State.CapturingMicOnly) {
             Log.w(TAG, "Already capturing")
             return true
         }
 
         _state.value = State.Starting
+        _lastError.value = null
+        micOnlyMode = false
         scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
         try {
             // Initialize mic recorder with VOICE_COMMUNICATION for AEC
+            Log.d(TAG, "Creating mic recorder...")
             micRecorder = createMicRecorder()
             if (micRecorder?.state != AudioRecord.STATE_INITIALIZED) {
-                throw IllegalStateException("Failed to initialize mic recorder")
+                throw IllegalStateException("Failed to initialize mic recorder. State: ${micRecorder?.state}")
+            }
+            Log.d(TAG, "Mic recorder initialized successfully")
+
+            // Try to initialize system audio recorder via AudioPlaybackCapture
+            try {
+                Log.d(TAG, "Creating system audio recorder...")
+                systemRecorder = createSystemRecorder()
+                if (systemRecorder?.state != AudioRecord.STATE_INITIALIZED) {
+                    throw IllegalStateException("System recorder state: ${systemRecorder?.state}")
+                }
+                Log.d(TAG, "System audio recorder initialized successfully")
+            } catch (e: Exception) {
+                // System audio capture failed - fall back to mic only
+                Log.w(TAG, "System audio capture not available (likely emulator): ${e.message}")
+                _lastError.value = "System audio not available: ${e.message}\nUsing mic-only mode."
+                micOnlyMode = true
+                systemRecorder?.release()
+                systemRecorder = null
             }
 
-            // Initialize system audio recorder via AudioPlaybackCapture
-            systemRecorder = createSystemRecorder()
-            if (systemRecorder?.state != AudioRecord.STATE_INITIALIZED) {
-                throw IllegalStateException("Failed to initialize system audio recorder")
-            }
-
-            // Start both recorders
+            // Start recorders
             micRecorder?.startRecording()
-            systemRecorder?.startRecording()
+            if (!micOnlyMode) {
+                systemRecorder?.startRecording()
+            }
 
             // Start the capture loop
             startCaptureLoop()
 
-            _state.value = State.Capturing
-            Log.i(TAG, "Audio capture started successfully")
+            _state.value = if (micOnlyMode) State.CapturingMicOnly else State.Capturing
+            Log.i(TAG, "Audio capture started successfully (micOnlyMode=$micOnlyMode)")
             return true
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start audio capture", e)
+            _lastError.value = e.message ?: "Unknown error"
             _state.value = State.Error(e.message ?: "Unknown error")
             stop()
             return false
@@ -195,29 +220,36 @@ class HybridAudioSource(
         val mixedBuffer = ByteArray(bufferSize)
 
         captureJob = scope?.launch {
-            Log.d(TAG, "Capture loop started with buffer size: $bufferSize bytes")
+            Log.d(TAG, "Capture loop started with buffer size: $bufferSize bytes, micOnlyMode=$micOnlyMode")
             
-            while (isActive && _state.value == State.Capturing) {
+            while (isActive && (_state.value == State.Capturing || _state.value == State.CapturingMicOnly)) {
                 try {
-                    // Read from both sources
-                    val micRead = micRecorder?.read(micBuffer, 0, bufferSize) ?: 0
-                    val systemRead = systemRecorder?.read(systemBuffer, 0, bufferSize) ?: 0
+                    if (micOnlyMode) {
+                        // Mic-only mode (emulator fallback)
+                        val micRead = micRecorder?.read(micBuffer, 0, bufferSize) ?: 0
+                        if (micRead > 0) {
+                            updateAudioLevel(micBuffer, micRead)
+                            onMixedPcmData?.invoke(micBuffer, micRead)
+                        } else if (micRead < 0) {
+                            Log.e(TAG, "Mic read error: $micRead")
+                        }
+                    } else {
+                        // Full hybrid mode - read from both sources
+                        val micRead = micRecorder?.read(micBuffer, 0, bufferSize) ?: 0
+                        val systemRead = systemRecorder?.read(systemBuffer, 0, bufferSize) ?: 0
 
-                    if (micRead < 0 || systemRead < 0) {
-                        Log.e(TAG, "Read error: mic=$micRead, system=$systemRead")
-                        continue
-                    }
+                        if (micRead < 0 || systemRead < 0) {
+                            Log.e(TAG, "Read error: mic=$micRead, system=$systemRead")
+                            continue
+                        }
 
-                    // Mix the audio (both are PCM 16-bit)
-                    val bytesToMix = min(micRead, systemRead)
-                    if (bytesToMix > 0) {
-                        mixPcm16(micBuffer, systemBuffer, mixedBuffer, bytesToMix)
-                        
-                        // Calculate audio level for UI feedback
-                        updateAudioLevel(mixedBuffer, bytesToMix)
-
-                        // Deliver mixed PCM to consumer (e.g., WebRTC)
-                        onMixedPcmData?.invoke(mixedBuffer, bytesToMix)
+                        // Mix the audio (both are PCM 16-bit)
+                        val bytesToMix = min(micRead, systemRead)
+                        if (bytesToMix > 0) {
+                            mixPcm16(micBuffer, systemBuffer, mixedBuffer, bytesToMix)
+                            updateAudioLevel(mixedBuffer, bytesToMix)
+                            onMixedPcmData?.invoke(mixedBuffer, bytesToMix)
+                        }
                     }
 
                 } catch (e: Exception) {

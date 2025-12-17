@@ -27,6 +27,7 @@ object AudioCaptureManager {
         data object WaitingForPermission : CaptureState()
         data object Starting : CaptureState()
         data object Capturing : CaptureState()
+        data object CapturingMicOnly : CaptureState()  // Fallback for emulators
         data class Error(val message: String) : CaptureState()
         data object Stopped : CaptureState()
     }
@@ -40,12 +41,16 @@ object AudioCaptureManager {
     private val _captureStats = MutableStateFlow(CaptureStats())
     val captureStats: StateFlow<CaptureStats> = _captureStats.asStateFlow()
 
+    private val _warningMessage = MutableStateFlow<String?>(null)
+    val warningMessage: StateFlow<String?> = _warningMessage.asStateFlow()
+
     private var mediaProjection: MediaProjection? = null
     private var hybridAudioSource: HybridAudioSource? = null
     private var captureStartTime: Long = 0L
     private var pcmBytesProcessed: Long = 0L
     private var scope: CoroutineScope? = null
     private var audioLevelJob: Job? = null
+    private var errorJob: Job? = null
 
     data class CaptureStats(
         val durationMs: Long = 0L,
@@ -111,7 +116,7 @@ object AudioCaptureManager {
                 }
             }
 
-            // Collect audio level
+            // Collect audio level and errors
             scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
             hybridAudioSource?.let { source ->
                 // Forward audio level updates
@@ -120,17 +125,26 @@ object AudioCaptureManager {
                         _audioLevel.value = level
                     }
                 }
+                // Forward error/warning messages
+                errorJob = scope?.launch {
+                    source.lastError.collect { error ->
+                        _warningMessage.value = error
+                    }
+                }
             }
 
             val started = hybridAudioSource?.start() == true
             if (started) {
                 captureStartTime = System.currentTimeMillis()
                 pcmBytesProcessed = 0L
-                _captureState.value = CaptureState.Capturing
-                Log.i(TAG, "Audio capture started")
+                // Check if we're in mic-only mode
+                val isMicOnly = hybridAudioSource?.state?.value is HybridAudioSource.State.CapturingMicOnly
+                _captureState.value = if (isMicOnly) CaptureState.CapturingMicOnly else CaptureState.Capturing
+                Log.i(TAG, "Audio capture started (micOnly=$isMicOnly)")
                 return true
             } else {
-                _captureState.value = CaptureState.Error("Failed to start audio capture")
+                val errorMsg = hybridAudioSource?.lastError?.value ?: "Failed to start audio capture"
+                _captureState.value = CaptureState.Error(errorMsg)
                 return false
             }
 
@@ -147,6 +161,9 @@ object AudioCaptureManager {
         audioLevelJob?.cancel()
         audioLevelJob = null
         
+        errorJob?.cancel()
+        errorJob = null
+        
         scope?.cancel()
         scope = null
         
@@ -157,6 +174,7 @@ object AudioCaptureManager {
         mediaProjection = null
 
         _audioLevel.value = 0f
+        _warningMessage.value = null
         _captureState.value = CaptureState.Stopped
         updateStats()
     }
@@ -181,7 +199,8 @@ object AudioCaptureManager {
         )
     }
 
-    fun isCapturing(): Boolean = _captureState.value == CaptureState.Capturing
+    fun isCapturing(): Boolean = _captureState.value == CaptureState.Capturing || 
+                                 _captureState.value == CaptureState.CapturingMicOnly
 
     fun hasMediaProjection(): Boolean = mediaProjection != null
 }
