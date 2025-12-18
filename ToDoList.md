@@ -21,7 +21,7 @@ Payment is intentionally **deferred until after MVP feasibility is proven**.
 - [x] **Step 3 — [Coding] Integrate Firebase + Crashlytics (early)** (Appendix E; pacing in Appendix B)
   - Goal: crash visibility while you iterate on audio + WebRTC
 
-- [ ] **Step 4 — [Coding] Prove audio capture feasibility locally (no networking yet)** (Appendix A for stack/audio scope; Appendix H Week 2–3 prompts; pacing in Appendix B)
+- [x] **Step 4 — [Coding] Prove audio capture feasibility locally (no networking yet)** (Appendix A for stack/audio scope; Appendix H Week 2–3 prompts; pacing in Appendix B)
   - Implement MediaProjection permission flow
   - Capture internal audio (AudioPlaybackCapture) + mic audio and mix PCM
   - Confirm you can:

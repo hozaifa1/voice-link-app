@@ -20,8 +20,9 @@ import org.webrtc.audio.JavaAudioDeviceModule
 import java.nio.ByteBuffer
 
 /**
- * Manages WebRTC PeerConnection for P2P audio streaming.
- * Handles ICE candidates, offers/answers, and audio track management.
+ * Manages WebRTC PeerConnection for P2P audio and video streaming.
+ * Handles ICE candidates, offers/answers, and audio/video track management.
+ * Supports screen sharing via MediaProjection.
  */
 class WebRtcManager(
     private val context: Context,
@@ -48,6 +49,12 @@ class WebRtcManager(
     private val _systemAudioActive = MutableStateFlow(false)
     val systemAudioActive: StateFlow<Boolean> = _systemAudioActive.asStateFlow()
 
+    private val _screenShareActive = MutableStateFlow(false)
+    val screenShareActive: StateFlow<Boolean> = _screenShareActive.asStateFlow()
+
+    private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
+    val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
+
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var localAudioTrack: AudioTrack? = null
@@ -58,6 +65,11 @@ class WebRtcManager(
     
     // Audio device module with callback for mixing
     private var audioDeviceModule: JavaAudioDeviceModule? = null
+    
+    // Screen capture for video sharing
+    private var screenCaptureManager: ScreenCaptureManager? = null
+    private var localVideoSource: VideoSource? = null
+    private var localVideoTrack: VideoTrack? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isInitiator = false
@@ -72,6 +84,9 @@ class WebRtcManager(
     private val connectionCheckIntervalMs = 10000L
 
     private val eglBase: EglBase by lazy { EglBase.create() }
+    
+    // Expose EglBase for video rendering
+    fun getEglBaseContext(): EglBase = eglBase
 
     fun initialize() {
         Log.d(TAG, "Initializing WebRTC")
@@ -164,6 +179,151 @@ class WebRtcManager(
         systemAudioMixer?.release()
         systemAudioMixer = null
         _systemAudioActive.value = false
+    }
+
+    /**
+     * Store MediaProjection permission for screen sharing.
+     * Call this immediately after receiving the permission result.
+     */
+    fun storeScreenSharePermission(resultCode: Int, data: Intent) {
+        if (screenCaptureManager == null) {
+            screenCaptureManager = ScreenCaptureManager(context, eglBase)
+        }
+        screenCaptureManager?.storePermissionResult(resultCode, data)
+    }
+
+    /**
+     * Enable screen sharing.
+     * Must call storeScreenSharePermission() first.
+     */
+    fun enableScreenShare(): Boolean {
+        Log.d(TAG, "Enabling screen share")
+        
+        val factory = peerConnectionFactory ?: run {
+            Log.e(TAG, "PeerConnectionFactory not initialized")
+            return false
+        }
+        
+        val pc = peerConnection ?: run {
+            Log.e(TAG, "PeerConnection not initialized")
+            return false
+        }
+        
+        try {
+            // Create screen capture manager if needed
+            if (screenCaptureManager == null) {
+                screenCaptureManager = ScreenCaptureManager(context, eglBase)
+            }
+            
+            val captureManager = screenCaptureManager!!
+            
+            if (!captureManager.hasPermission()) {
+                Log.e(TAG, "No screen share permission stored")
+                return false
+            }
+            
+            // Create video source
+            localVideoSource = factory.createVideoSource(true) // isScreencast = true
+            
+            // Initialize the screen capturer with the video source
+            if (!captureManager.initialize(localVideoSource!!)) {
+                Log.e(TAG, "Failed to initialize screen capturer")
+                localVideoSource?.dispose()
+                localVideoSource = null
+                return false
+            }
+            
+            // Create video track
+            localVideoTrack = factory.createVideoTrack("video0", localVideoSource)
+            
+            // Add video track to peer connection
+            localVideoTrack?.let { track ->
+                pc.addTrack(track, listOf("stream0"))
+                Log.d(TAG, "Local video track added")
+            }
+            
+            // Start capturing
+            if (!captureManager.startCapture()) {
+                Log.e(TAG, "Failed to start screen capture")
+                disableScreenShare()
+                return false
+            }
+            
+            _screenShareActive.value = true
+            
+            // Trigger renegotiation to add video to the session
+            triggerRenegotiation()
+            
+            Log.i(TAG, "Screen share enabled successfully")
+            return true
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enabling screen share", e)
+            disableScreenShare()
+            return false
+        }
+    }
+
+    /**
+     * Disable screen sharing.
+     */
+    fun disableScreenShare() {
+        Log.d(TAG, "Disabling screen share")
+        
+        screenCaptureManager?.release()
+        screenCaptureManager = null
+        
+        localVideoTrack?.let { track ->
+            track.setEnabled(false)
+            // Remove from peer connection
+            peerConnection?.senders?.find { it.track()?.id() == track.id() }?.let { sender ->
+                peerConnection?.removeTrack(sender)
+            }
+            track.dispose()
+        }
+        localVideoTrack = null
+        
+        localVideoSource?.dispose()
+        localVideoSource = null
+        
+        _screenShareActive.value = false
+        
+        // Trigger renegotiation to remove video from the session
+        if (peerConnection != null && currentRoomId != null) {
+            triggerRenegotiation()
+        }
+    }
+
+    /**
+     * Trigger SDP renegotiation when tracks are added/removed.
+     */
+    private fun triggerRenegotiation() {
+        val roomId = currentRoomId ?: return
+        
+        if (isInitiator) {
+            // Create new offer with updated tracks
+            val constraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+            }
+            
+            peerConnection?.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription?) {
+                    sdp?.let {
+                        Log.d(TAG, "Renegotiation offer created")
+                        peerConnection?.setLocalDescription(SimpleSdpObserver("setLocalDescription (renegotiation)"), it)
+                        scope.launch {
+                            signaling.sendOffer(roomId, it)
+                        }
+                    }
+                }
+                override fun onSetSuccess() {}
+                override fun onCreateFailure(error: String?) {
+                    Log.e(TAG, "Renegotiation offer failed: $error")
+                }
+                override fun onSetFailure(error: String?) {}
+            }, constraints)
+        }
     }
 
     fun createRoom(onRoomCreated: (String) -> Unit) {
@@ -308,8 +468,16 @@ class WebRtcManager(
 
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
                 Log.d(TAG, "Remote track added: ${receiver?.track()?.kind()}")
-                if (receiver?.track()?.kind() == "audio") {
-                    _remoteAudioActive.value = true
+                when (receiver?.track()?.kind()) {
+                    "audio" -> {
+                        _remoteAudioActive.value = true
+                    }
+                    "video" -> {
+                        val videoTrack = receiver.track() as? VideoTrack
+                        videoTrack?.setEnabled(true)
+                        _remoteVideoTrack.value = videoTrack
+                        Log.d(TAG, "Remote video track received and enabled")
+                    }
                 }
             }
 
@@ -361,7 +529,7 @@ class WebRtcManager(
     private fun createOffer(roomId: String) {
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         }
 
         peerConnection?.createOffer(object : SdpObserver {
@@ -395,7 +563,7 @@ class WebRtcManager(
     private fun createAnswer(roomId: String) {
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         }
 
         peerConnection?.createAnswer(object : SdpObserver {
@@ -465,7 +633,7 @@ class WebRtcManager(
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         }
         
         if (isInitiator) {
@@ -531,6 +699,7 @@ class WebRtcManager(
         Log.d(TAG, "Disconnecting")
         
         stopConnectionMonitoring()
+        disableScreenShare()
         disableSystemAudio()
         
         currentRoomId?.let { roomId ->
@@ -554,6 +723,8 @@ class WebRtcManager(
         _connectionState.value = ConnectionState.Idle
         _remoteAudioActive.value = false
         _systemAudioActive.value = false
+        _screenShareActive.value = false
+        _remoteVideoTrack.value = null
     }
 
     fun release() {

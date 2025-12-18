@@ -6,6 +6,7 @@ import android.media.projection.MediaProjectionManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,11 +29,15 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.voicelink.connect.service.AudioCaptureService
 import com.voicelink.connect.service.WebRtcService
 import com.voicelink.connect.util.PermissionHelper
 import com.voicelink.connect.webrtc.FirebaseSignaling
 import com.voicelink.connect.webrtc.WebRtcManager
+import org.webrtc.RendererCommon
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,9 +77,11 @@ fun RoomScreen(
     val connectionState by webRtcManager.connectionState.collectAsState()
     val remoteAudioActive by webRtcManager.remoteAudioActive.collectAsState()
     val systemAudioActive by webRtcManager.systemAudioActive.collectAsState()
+    val screenShareActive by webRtcManager.screenShareActive.collectAsState()
+    val remoteVideoTrack by webRtcManager.remoteVideoTrack.collectAsState()
     
     // MediaProjection launcher for system audio sharing
-    val mediaProjectionLauncher = rememberLauncherForActivityResult(
+    val audioProjectionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
@@ -82,6 +89,19 @@ fun RoomScreen(
             AudioCaptureService.prepareCapture(context)
             // Enable system audio in WebRTC
             webRtcManager.enableSystemAudio(result.resultCode, result.data!!)
+        }
+    }
+    
+    // MediaProjection launcher for screen sharing (video)
+    val screenShareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            // Start foreground service for media projection
+            AudioCaptureService.prepareCapture(context)
+            // Store permission and enable screen share
+            webRtcManager.storeScreenSharePermission(result.resultCode, result.data!!)
+            webRtcManager.enableScreenShare()
         }
     }
     
@@ -214,6 +234,9 @@ fun RoomScreen(
                         isMuted = isMuted,
                         remoteAudioActive = remoteAudioActive,
                         systemAudioActive = systemAudioActive,
+                        screenShareActive = screenShareActive,
+                        remoteVideoTrack = remoteVideoTrack,
+                        webRtcManager = webRtcManager,
                         onToggleMute = {
                             isMuted = !isMuted
                             webRtcManager.setAudioEnabled(!isMuted)
@@ -223,9 +246,19 @@ fun RoomScreen(
                                 webRtcManager.disableSystemAudio()
                                 AudioCaptureService.stopCapture(context)
                             } else {
-                                // Request MediaProjection permission
+                                // Request MediaProjection permission for audio
                                 val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                                mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+                                audioProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+                            }
+                        },
+                        onToggleScreenShare = {
+                            if (screenShareActive) {
+                                webRtcManager.disableScreenShare()
+                                AudioCaptureService.stopCapture(context)
+                            } else {
+                                // Request MediaProjection permission for screen sharing
+                                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                                screenShareLauncher.launch(projectionManager.createScreenCaptureIntent())
                             }
                         },
                         onDisconnect = {
@@ -535,46 +568,93 @@ private fun ColumnScope.ConnectedScreen(
     isMuted: Boolean,
     remoteAudioActive: Boolean,
     systemAudioActive: Boolean,
+    screenShareActive: Boolean,
+    remoteVideoTrack: VideoTrack?,
+    webRtcManager: WebRtcManager,
     onToggleMute: () -> Unit,
     onToggleSystemAudio: () -> Unit,
+    onToggleScreenShare: () -> Unit,
     onDisconnect: () -> Unit
 ) {
-    Spacer(modifier = Modifier.height(32.dp))
+    // Remote Video Display (if receiving video)
+    if (remoteVideoTrack != null) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            RemoteVideoView(
+                videoTrack = remoteVideoTrack,
+                eglBase = webRtcManager.getEglBaseContext(),
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+    } else {
+        // Placeholder when no video
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .border(
+                    width = 2.dp,
+                    color = MaterialTheme.colorScheme.outline,
+                    shape = RoundedCornerShape(12.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Default.Videocam,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.outline
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "No video stream",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+    }
     
-    // Connection status
-    Box(
-        modifier = Modifier
-            .size(100.dp)
-            .background(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(50.dp)
-            ),
-        contentAlignment = Alignment.Center
+    // Connection info row
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = Icons.Default.WifiTethering,
-            contentDescription = null,
-            modifier = Modifier.size(56.dp),
-            tint = MaterialTheme.colorScheme.primary
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.WifiTethering,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Connected",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Text(
+            text = "Room: $roomCode",
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace
         )
     }
     
     Spacer(modifier = Modifier.height(16.dp))
-    
-    Text(
-        text = "Connected!",
-        style = MaterialTheme.typography.headlineMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary
-    )
-    
-    Text(
-        text = "Room: $roomCode",
-        style = MaterialTheme.typography.bodyLarge,
-        fontFamily = FontFamily.Monospace
-    )
-    
-    Spacer(modifier = Modifier.height(24.dp))
     
     // Status indicators
     Row(
@@ -592,13 +672,18 @@ private fun ColumnScope.ConnectedScreen(
             isActive = remoteAudioActive
         )
         StatusIndicator(
-            icon = Icons.Default.ScreenShare,
-            label = if (systemAudioActive) "Sharing" else "Off",
+            icon = Icons.Default.Videocam,
+            label = if (screenShareActive) "Sharing" else "Off",
+            isActive = screenShareActive
+        )
+        StatusIndicator(
+            icon = Icons.Default.VolumeUp,
+            label = if (systemAudioActive) "Audio On" else "Audio Off",
             isActive = systemAudioActive
         )
     }
     
-    Spacer(modifier = Modifier.height(32.dp))
+    Spacer(modifier = Modifier.height(24.dp))
     
     // Control buttons row
     Row(
@@ -606,78 +691,50 @@ private fun ColumnScope.ConnectedScreen(
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         // Mute button
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            FilledTonalButton(
-                onClick = onToggleMute,
-                modifier = Modifier.size(64.dp),
-                shape = RoundedCornerShape(32.dp),
-                colors = if (isMuted) {
-                    ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                } else {
-                    ButtonDefaults.filledTonalButtonColors()
-                }
-            ) {
-                Icon(
-                    imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                    contentDescription = if (isMuted) "Unmute" else "Mute",
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = if (isMuted) "Unmute" else "Mute",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        ControlButton(
+            icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+            label = if (isMuted) "Unmute" else "Mute",
+            isActive = !isMuted,
+            isError = isMuted,
+            onClick = onToggleMute
+        )
+        
+        // Screen Share button
+        ControlButton(
+            icon = if (screenShareActive) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
+            label = if (screenShareActive) "Stop Video" else "Share Screen",
+            isActive = screenShareActive,
+            onClick = onToggleScreenShare
+        )
         
         // Share Audio button
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            FilledTonalButton(
-                onClick = onToggleSystemAudio,
-                modifier = Modifier.size(64.dp),
-                shape = RoundedCornerShape(32.dp),
-                colors = if (systemAudioActive) {
-                    ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                } else {
-                    ButtonDefaults.filledTonalButtonColors()
-                }
-            ) {
-                Icon(
-                    imageVector = if (systemAudioActive) Icons.Default.ScreenShare else Icons.Default.StopScreenShare,
-                    contentDescription = if (systemAudioActive) "Stop Sharing" else "Share Audio",
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = if (systemAudioActive) "Stop Share" else "Share Audio",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        ControlButton(
+            icon = if (systemAudioActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+            label = if (systemAudioActive) "Stop Audio" else "Share Audio",
+            isActive = systemAudioActive,
+            onClick = onToggleSystemAudio
+        )
     }
     
-    // Info text about audio sharing
-    if (!systemAudioActive) {
-        Spacer(modifier = Modifier.height(16.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-        ) {
-            Text(
-                text = "Tap 'Share Audio' to share your device's audio (music, videos, games) with your friend.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(12.dp),
-                textAlign = TextAlign.Center
-            )
-        }
+    // Info text
+    Spacer(modifier = Modifier.height(16.dp))
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Text(
+            text = when {
+                screenShareActive && systemAudioActive -> "Sharing your screen and audio with your friend."
+                screenShareActive -> "Sharing your screen. Tap 'Share Audio' to also share app sounds."
+                systemAudioActive -> "Sharing audio only. Tap 'Share Screen' to share video."
+                else -> "Tap 'Share Screen' to share your screen, or 'Share Audio' to share app sounds."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(12.dp),
+            textAlign = TextAlign.Center
+        )
     }
     
     Spacer(modifier = Modifier.weight(1f))
@@ -694,6 +751,77 @@ private fun ColumnScope.ConnectedScreen(
         Spacer(modifier = Modifier.width(8.dp))
         Text("Disconnect")
     }
+}
+
+@Composable
+private fun ControlButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    isActive: Boolean,
+    isError: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        FilledTonalButton(
+            onClick = onClick,
+            modifier = Modifier.size(56.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = when {
+                isError -> ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+                isActive -> ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+                else -> ButtonDefaults.filledTonalButtonColors()
+            }
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun RemoteVideoView(
+    videoTrack: VideoTrack,
+    eglBase: org.webrtc.EglBase,
+    modifier: Modifier = Modifier
+) {
+    var surfaceViewRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+    
+    DisposableEffect(videoTrack) {
+        onDispose {
+            surfaceViewRenderer?.let { renderer ->
+                videoTrack.removeSink(renderer)
+                renderer.release()
+            }
+        }
+    }
+    
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            SurfaceViewRenderer(context).apply {
+                init(eglBase.eglBaseContext, null)
+                setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+                setEnableHardwareScaler(true)
+                setMirror(false)
+                surfaceViewRenderer = this
+                videoTrack.addSink(this)
+            }
+        }
+    )
 }
 
 @Composable
