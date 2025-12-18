@@ -4,10 +4,13 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.webrtc.*
 import org.webrtc.audio.JavaAudioDeviceModule
@@ -46,6 +49,14 @@ class WebRtcManager(
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isInitiator = false
     private var currentRoomId: String? = null
+    
+    // ICE restart and connection monitoring
+    private var iceRestartCount = 0
+    private var connectionMonitorJob: Job? = null
+    private var lastIceRestartTime = 0L
+    private val maxIceRestarts = 3
+    private val iceRestartCooldownMs = 5000L
+    private val connectionCheckIntervalMs = 10000L
 
     private val eglBase: EglBase by lazy { EglBase.create() }
 
@@ -156,14 +167,22 @@ class WebRtcManager(
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                 Log.d(TAG, "ICE connection state: $state")
                 when (state) {
-                    PeerConnection.IceConnectionState.CONNECTED -> {
+                    PeerConnection.IceConnectionState.CONNECTED,
+                    PeerConnection.IceConnectionState.COMPLETED -> {
                         _connectionState.value = ConnectionState.Connected
+                        iceRestartCount = 0 // Reset restart count on successful connection
+                        startConnectionMonitoring()
                     }
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        _connectionState.value = ConnectionState.Disconnected
+                        Log.w(TAG, "ICE disconnected, attempting restart...")
+                        attemptIceRestart()
                     }
                     PeerConnection.IceConnectionState.FAILED -> {
-                        _connectionState.value = ConnectionState.Failed("ICE connection failed")
+                        Log.e(TAG, "ICE connection failed, attempting restart...")
+                        attemptIceRestart()
+                    }
+                    PeerConnection.IceConnectionState.CHECKING -> {
+                        _connectionState.value = ConnectionState.Connecting
                     }
                     else -> {}
                 }
@@ -318,8 +337,119 @@ class WebRtcManager(
         }, constraints)
     }
 
+    private fun attemptIceRestart() {
+        val now = System.currentTimeMillis()
+        
+        // Check cooldown period
+        if (now - lastIceRestartTime < iceRestartCooldownMs) {
+            Log.d(TAG, "ICE restart on cooldown, skipping")
+            return
+        }
+        
+        // Check restart count
+        if (iceRestartCount >= maxIceRestarts) {
+            Log.e(TAG, "Max ICE restarts ($maxIceRestarts) exceeded, connection failed")
+            _connectionState.value = ConnectionState.Failed("Connection lost - please rejoin")
+            return
+        }
+        
+        iceRestartCount++
+        lastIceRestartTime = now
+        Log.d(TAG, "Attempting ICE restart #$iceRestartCount")
+        
+        scope.launch {
+            try {
+                performIceRestart()
+            } catch (e: Exception) {
+                Log.e(TAG, "ICE restart failed", e)
+                if (iceRestartCount >= maxIceRestarts) {
+                    _connectionState.value = ConnectionState.Failed("Connection lost - please rejoin")
+                }
+            }
+        }
+    }
+    
+    private fun performIceRestart() {
+        val pc = peerConnection ?: run {
+            Log.e(TAG, "No peer connection for ICE restart")
+            return
+        }
+        
+        val roomId = currentRoomId ?: run {
+            Log.e(TAG, "No room ID for ICE restart")
+            return
+        }
+        
+        // Create new offer with ICE restart flag
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
+        }
+        
+        if (isInitiator) {
+            // Initiator creates new offer with ICE restart
+            pc.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription?) {
+                    sdp?.let {
+                        Log.d(TAG, "ICE restart offer created")
+                        pc.setLocalDescription(SimpleSdpObserver("setLocalDescription (ICE restart)"), it)
+                        scope.launch {
+                            signaling.sendOffer(roomId, it)
+                        }
+                    }
+                }
+                override fun onSetSuccess() {}
+                override fun onCreateFailure(error: String?) {
+                    Log.e(TAG, "Failed to create ICE restart offer: $error")
+                }
+                override fun onSetFailure(error: String?) {}
+            }, constraints)
+        } else {
+            // Non-initiator just restarts ICE gathering
+            pc.restartIce()
+        }
+    }
+    
+    private fun startConnectionMonitoring() {
+        connectionMonitorJob?.cancel()
+        connectionMonitorJob = scope.launch {
+            while (isActive) {
+                delay(connectionCheckIntervalMs)
+                checkConnectionHealth()
+            }
+        }
+    }
+    
+    private fun stopConnectionMonitoring() {
+        connectionMonitorJob?.cancel()
+        connectionMonitorJob = null
+    }
+    
+    private fun checkConnectionHealth() {
+        val pc = peerConnection ?: return
+        
+        when (pc.iceConnectionState()) {
+            PeerConnection.IceConnectionState.DISCONNECTED,
+            PeerConnection.IceConnectionState.FAILED -> {
+                Log.w(TAG, "Connection health check: connection degraded")
+                attemptIceRestart()
+            }
+            PeerConnection.IceConnectionState.CONNECTED,
+            PeerConnection.IceConnectionState.COMPLETED -> {
+                // Connection is healthy
+                Log.v(TAG, "Connection health check: OK")
+            }
+            else -> {
+                Log.d(TAG, "Connection health check: state=${pc.iceConnectionState()}")
+            }
+        }
+    }
+
     fun disconnect() {
         Log.d(TAG, "Disconnecting")
+        
+        stopConnectionMonitoring()
         
         currentRoomId?.let { roomId ->
             scope.launch {
@@ -338,15 +468,21 @@ class WebRtcManager(
         peerConnection = null
         
         currentRoomId = null
+        iceRestartCount = 0
         _connectionState.value = ConnectionState.Idle
         _remoteAudioActive.value = false
     }
 
     fun release() {
+        stopConnectionMonitoring()
         disconnect()
         peerConnectionFactory?.dispose()
         peerConnectionFactory = null
-        eglBase.release()
+        try {
+            eglBase.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing EGL base", e)
+        }
     }
 
     fun setAudioEnabled(enabled: Boolean) {

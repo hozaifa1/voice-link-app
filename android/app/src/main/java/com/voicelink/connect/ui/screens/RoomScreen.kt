@@ -1,5 +1,7 @@
 package com.voicelink.connect.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ColumnScope
@@ -23,6 +25,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.voicelink.connect.service.WebRtcService
+import com.voicelink.connect.util.PermissionHelper
 import com.voicelink.connect.webrtc.FirebaseSignaling
 import com.voicelink.connect.webrtc.WebRtcManager
 import kotlinx.coroutines.launch
@@ -41,19 +45,41 @@ fun RoomScreen(
     var joinCode by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isMuted by remember { mutableStateOf(false) }
+    var hasPermissions by remember { mutableStateOf(PermissionHelper.hasAllPermissions(context)) }
     
     val signaling = remember { FirebaseSignaling() }
     val webRtcManager = remember { WebRtcManager(context, signaling) }
     
+    // Permission launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasPermissions = permissions.all { it.value }
+        if (!hasPermissions) {
+            errorMessage = "Microphone permission is required for voice chat"
+        }
+    }
+    
+    // Request permissions on first launch
+    LaunchedEffect(Unit) {
+        if (!hasPermissions) {
+            permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
+        }
+    }
+    
     val connectionState by webRtcManager.connectionState.collectAsState()
     val remoteAudioActive by webRtcManager.remoteAudioActive.collectAsState()
     
-    LaunchedEffect(Unit) {
-        webRtcManager.initialize()
+    LaunchedEffect(hasPermissions) {
+        if (hasPermissions) {
+            webRtcManager.initialize()
+        }
     }
     
     DisposableEffect(Unit) {
         onDispose {
+            // Stop WebRTC service when leaving
+            WebRtcService.stop(context)
             webRtcManager.release()
             signaling.cleanup()
         }
@@ -105,6 +131,12 @@ fun RoomScreen(
                         joinCode = joinCode,
                         onJoinCodeChange = { joinCode = it.uppercase().take(6) },
                         onCreateRoom = {
+                            if (!hasPermissions) {
+                                permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
+                                return@InitialScreen
+                            }
+                            // Start foreground service to keep connection alive
+                            WebRtcService.start(context)
                             screenState = RoomScreenState.Creating
                             webRtcManager.createRoom { createdRoomCode ->
                                 roomCode = createdRoomCode
@@ -112,15 +144,26 @@ fun RoomScreen(
                             }
                         },
                         onJoinRoom = {
+                            if (!hasPermissions) {
+                                permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
+                                return@InitialScreen
+                            }
                             if (joinCode.length == 6) {
+                                // Start foreground service to keep connection alive
+                                WebRtcService.start(context)
                                 screenState = RoomScreenState.Joining
                                 webRtcManager.joinRoom(joinCode) { success ->
                                     if (!success) {
+                                        WebRtcService.stop(context)
                                         errorMessage = "Failed to join room. Check the code and try again."
                                         screenState = RoomScreenState.Initial
                                     }
                                 }
                             }
+                        },
+                        hasPermissions = hasPermissions,
+                        onRequestPermissions = {
+                            permissionLauncher.launch(PermissionHelper.REQUIRED_PERMISSIONS)
                         },
                         errorMessage = errorMessage,
                         onDismissError = { errorMessage = null }
@@ -142,6 +185,7 @@ fun RoomScreen(
                             clipboardManager.setText(AnnotatedString(roomCode))
                         },
                         onCancel = {
+                            WebRtcService.stop(context)
                             webRtcManager.disconnect()
                             screenState = RoomScreenState.Initial
                             roomCode = ""
@@ -159,6 +203,7 @@ fun RoomScreen(
                             webRtcManager.setAudioEnabled(!isMuted)
                         },
                         onDisconnect = {
+                            WebRtcService.stop(context)
                             webRtcManager.disconnect()
                             screenState = RoomScreenState.Initial
                             roomCode = ""
@@ -187,9 +232,49 @@ private fun InitialScreen(
     onJoinCodeChange: (String) -> Unit,
     onCreateRoom: () -> Unit,
     onJoinRoom: () -> Unit,
+    hasPermissions: Boolean,
+    onRequestPermissions: () -> Unit,
     errorMessage: String?,
     onDismissError: () -> Unit
 ) {
+    // Permission banner if not granted
+    if (!hasPermissions) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Permissions Required",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Text(
+                        text = "Microphone access is needed for voice chat",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+                TextButton(onClick = onRequestPermissions) {
+                    Text("Grant")
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+    
     Spacer(modifier = Modifier.height(32.dp))
     
     Icon(
