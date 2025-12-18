@@ -21,16 +21,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // ABI splits to reduce APK size (WebRTC includes native libs for all architectures)
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            // Most Android devices use arm64-v8a, some older use armeabi-v7a
-            include("armeabi-v7a", "arm64-v8a")
-            isUniversalApk = false // Don't create a universal APK
-        }
-    }
+    // ABI splits disabled - Firebase App Distribution doesn't support multiple APKs
+    // APK size will be larger (~100MB) but distribution works
+    // For Play Store release, you can enable splits and upload via Play Console instead
+    // splits {
+    //     abi {
+    //         isEnable = true
+    //         reset()
+    //         include("armeabi-v7a", "arm64-v8a")
+    //         isUniversalApk = false
+    //     }
+    // }
 
     buildTypes {
         release {
