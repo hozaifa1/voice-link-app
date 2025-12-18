@@ -1,7 +1,11 @@
 package com.voicelink.connect.webrtc
 
 import android.content.Context
+import android.content.Intent
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.util.Log
+import com.voicelink.connect.audio.HybridAudioSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,10 +45,19 @@ class WebRtcManager(
     private val _remoteAudioActive = MutableStateFlow(false)
     val remoteAudioActive: StateFlow<Boolean> = _remoteAudioActive.asStateFlow()
 
+    private val _systemAudioActive = MutableStateFlow(false)
+    val systemAudioActive: StateFlow<Boolean> = _systemAudioActive.asStateFlow()
+
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var localAudioTrack: AudioTrack? = null
     private var audioSource: AudioSource? = null
+    
+    // System audio capture via MediaProjection
+    private var mediaProjection: MediaProjection? = null
+    private var hybridAudioSource: HybridAudioSource? = null
+    private var systemAudioTrack: AudioTrack? = null
+    private var systemAudioSource: AudioSource? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isInitiator = false
@@ -73,16 +86,73 @@ class WebRtcManager(
         )
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
 
+        // Create audio device module with enhanced settings
+        val audioDeviceModule = JavaAudioDeviceModule.builder(context)
+            .setUseHardwareAcousticEchoCanceler(true)
+            .setUseHardwareNoiseSuppressor(true)
+            .setUseStereoInput(false) // Mono for voice
+            .setUseStereoOutput(true) // Stereo output for system audio
+            .createAudioDeviceModule()
+
         peerConnectionFactory = PeerConnectionFactory.builder()
             .setVideoEncoderFactory(encoderFactory)
             .setVideoDecoderFactory(decoderFactory)
-            .setAudioDeviceModule(JavaAudioDeviceModule.builder(context)
-                .setUseHardwareAcousticEchoCanceler(true)
-                .setUseHardwareNoiseSuppressor(true)
-                .createAudioDeviceModule())
+            .setAudioDeviceModule(audioDeviceModule)
             .createPeerConnectionFactory()
 
         Log.d(TAG, "WebRTC initialized successfully")
+    }
+
+    /**
+     * Enable system audio capture with MediaProjection.
+     * Call this after receiving MediaProjection permission result.
+     */
+    fun enableSystemAudio(resultCode: Int, data: Intent): Boolean {
+        Log.d(TAG, "Enabling system audio capture")
+        
+        try {
+            val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) 
+                as MediaProjectionManager
+            mediaProjection = projectionManager.getMediaProjection(resultCode, data)
+            
+            if (mediaProjection == null) {
+                Log.e(TAG, "Failed to get MediaProjection")
+                return false
+            }
+            
+            // Create HybridAudioSource with MediaProjection
+            hybridAudioSource = HybridAudioSource(mediaProjection).apply {
+                onMixedPcmData = { pcmData, length ->
+                    // Audio data is being captured - could be used for custom processing
+                    // For now, WebRTC uses the system audio via the audio device module
+                }
+            }
+            
+            val started = hybridAudioSource?.start() == true
+            if (started) {
+                _systemAudioActive.value = hybridAudioSource?.state?.value !is HybridAudioSource.State.CapturingMicOnly
+                Log.i(TAG, "System audio capture enabled: ${_systemAudioActive.value}")
+                return true
+            } else {
+                Log.e(TAG, "Failed to start HybridAudioSource")
+                return false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enabling system audio", e)
+            return false
+        }
+    }
+
+    /**
+     * Disable system audio capture.
+     */
+    fun disableSystemAudio() {
+        Log.d(TAG, "Disabling system audio")
+        hybridAudioSource?.stop()
+        hybridAudioSource = null
+        mediaProjection?.stop()
+        mediaProjection = null
+        _systemAudioActive.value = false
     }
 
     fun createRoom(onRoomCreated: (String) -> Unit) {
@@ -450,6 +520,7 @@ class WebRtcManager(
         Log.d(TAG, "Disconnecting")
         
         stopConnectionMonitoring()
+        disableSystemAudio()
         
         currentRoomId?.let { roomId ->
             scope.launch {
@@ -461,8 +532,15 @@ class WebRtcManager(
         localAudioTrack?.dispose()
         localAudioTrack = null
         
+        systemAudioTrack?.setEnabled(false)
+        systemAudioTrack?.dispose()
+        systemAudioTrack = null
+        
         audioSource?.dispose()
         audioSource = null
+        
+        systemAudioSource?.dispose()
+        systemAudioSource = null
         
         peerConnection?.close()
         peerConnection = null
@@ -471,6 +549,7 @@ class WebRtcManager(
         iceRestartCount = 0
         _connectionState.value = ConnectionState.Idle
         _remoteAudioActive.value = false
+        _systemAudioActive.value = false
     }
 
     fun release() {

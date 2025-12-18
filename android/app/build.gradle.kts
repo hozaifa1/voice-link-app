@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
+    alias(libs.plugins.firebase.appdistribution)
 }
 
 android {
@@ -20,6 +21,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // ABI splits to reduce APK size (WebRTC includes native libs for all architectures)
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            // Most Android devices use arm64-v8a, some older use armeabi-v7a
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = false // Don't create a universal APK
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -28,11 +40,24 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            
+            // Firebase App Distribution for release builds
+            firebaseAppDistribution {
+                artifactType = "APK"
+                // Add your tester emails here (comma-separated)
+                testers = "" // e.g., "email1@gmail.com, email2@gmail.com"
+                // Or use a file: testersFile = "testers.txt"
+            }
         }
         debug {
             isMinifyEnabled = false
-            // applicationIdSuffix removed to match google-services.json
             versionNameSuffix = "-debug"
+            
+            // Firebase App Distribution for debug builds
+            firebaseAppDistribution {
+                artifactType = "APK"
+                testers = "" // Add tester emails here
+            }
         }
     }
 

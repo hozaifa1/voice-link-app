@@ -22,8 +22,6 @@ import androidx.compose.ui.Modifier
 import com.voicelink.connect.audio.AudioCaptureManager
 import com.voicelink.connect.service.AudioCaptureService
 import com.voicelink.connect.ui.theme.VoiceLinkTheme
-import com.voicelink.connect.ui.screens.AudioCaptureTestScreen
-import com.voicelink.connect.ui.screens.HomeScreen
 import com.voicelink.connect.ui.screens.RoomScreen
 
 class MainActivity : ComponentActivity() {
@@ -83,25 +81,10 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Navigation state for Step 5 WebRTC testing
-                    var currentScreen by remember { mutableStateOf("room") }
-                    
-                    when (currentScreen) {
-                        "room" -> {
-                            RoomScreen(
-                                onBackClick = { currentScreen = "home" }
-                            )
-                        }
-                        "audio_test" -> {
-                            AudioCaptureTestScreen(
-                                onBackClick = { currentScreen = "room" },
-                                onRequestMediaProjection = { requestMediaProjection() }
-                            )
-                        }
-                        else -> {
-                            HomeScreen()
-                        }
-                    }
+                    // Main screen - RoomScreen handles all WebRTC functionality
+                    RoomScreen(
+                        onBackClick = { finish() } // Exit app on back
+                    )
                 }
             }
         }

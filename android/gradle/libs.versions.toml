@@ -11,6 +11,7 @@ webrtc = "1.1.2"
 googleServices = "4.4.4"
 firebaseBom = "34.7.0"
 firebaseCrashlyticsPlugin = "3.0.3"
+firebaseAppDistribution = "5.0.0"
 accompanist = "0.34.0"
 
 [libraries]
@@ -60,3 +61,4 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
 firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsPlugin" }
+firebase-appdistribution = { id = "com.google.firebase.appdistribution", version.ref = "firebaseAppDistribution" }
