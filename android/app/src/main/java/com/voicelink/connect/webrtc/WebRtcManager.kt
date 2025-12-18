@@ -2,10 +2,8 @@ package com.voicelink.connect.webrtc
 
 import android.content.Context
 import android.content.Intent
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.util.Log
-import com.voicelink.connect.audio.HybridAudioSource
+import com.voicelink.connect.audio.SystemAudioMixer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -17,7 +15,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.webrtc.*
+import org.webrtc.audio.AudioRecordDataCallback
 import org.webrtc.audio.JavaAudioDeviceModule
+import java.nio.ByteBuffer
 
 /**
  * Manages WebRTC PeerConnection for P2P audio streaming.
@@ -53,11 +53,11 @@ class WebRtcManager(
     private var localAudioTrack: AudioTrack? = null
     private var audioSource: AudioSource? = null
     
-    // System audio capture via MediaProjection
-    private var mediaProjection: MediaProjection? = null
-    private var hybridAudioSource: HybridAudioSource? = null
-    private var systemAudioTrack: AudioTrack? = null
-    private var systemAudioSource: AudioSource? = null
+    // System audio mixer for capturing and mixing system audio into WebRTC
+    private var systemAudioMixer: SystemAudioMixer? = null
+    
+    // Audio device module with callback for mixing
+    private var audioDeviceModule: JavaAudioDeviceModule? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isInitiator = false
@@ -86,12 +86,30 @@ class WebRtcManager(
         )
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
 
-        // Create audio device module with enhanced settings
-        val audioDeviceModule = JavaAudioDeviceModule.builder(context)
+        // Create audio device module with callback for system audio mixing
+        // The AudioRecordDataCallback allows us to modify the mic audio buffer
+        // before it's sent to WebRTC, enabling us to mix in system audio
+        audioDeviceModule = JavaAudioDeviceModule.builder(context)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
             .setUseStereoInput(false) // Mono for voice
-            .setUseStereoOutput(true) // Stereo output for system audio
+            .setUseStereoOutput(true) // Stereo output
+            .setAudioRecordDataCallback(object : AudioRecordDataCallback {
+                override fun onAudioDataRecorded(
+                    audioFormat: Int,
+                    channelCount: Int,
+                    sampleRate: Int,
+                    audioBuffer: ByteBuffer
+                ) {
+                    // Mix system audio into the mic buffer if system audio is active
+                    systemAudioMixer?.let { mixer ->
+                        if (mixer.isActive.value) {
+                            val bytesRead = audioBuffer.remaining()
+                            mixer.mixIntoBuffer(audioBuffer, bytesRead)
+                        }
+                    }
+                }
+            })
             .createAudioDeviceModule()
 
         peerConnectionFactory = PeerConnectionFactory.builder()
@@ -106,39 +124,32 @@ class WebRtcManager(
     /**
      * Enable system audio capture with MediaProjection.
      * Call this after receiving MediaProjection permission result.
+     * 
+     * System audio will be mixed into the microphone audio stream in real-time
+     * via the AudioRecordDataCallback in the JavaAudioDeviceModule.
      */
     fun enableSystemAudio(resultCode: Int, data: Intent): Boolean {
         Log.d(TAG, "Enabling system audio capture")
         
         try {
-            val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) 
-                as MediaProjectionManager
-            mediaProjection = projectionManager.getMediaProjection(resultCode, data)
-            
-            if (mediaProjection == null) {
-                Log.e(TAG, "Failed to get MediaProjection")
-                return false
+            // Create and initialize SystemAudioMixer
+            if (systemAudioMixer == null) {
+                systemAudioMixer = SystemAudioMixer(context)
             }
             
-            // Create HybridAudioSource with MediaProjection
-            hybridAudioSource = HybridAudioSource(mediaProjection).apply {
-                onMixedPcmData = { pcmData, length ->
-                    // Audio data is being captured - could be used for custom processing
-                    // For now, WebRTC uses the system audio via the audio device module
-                }
-            }
-            
-            val started = hybridAudioSource?.start() == true
-            if (started) {
-                _systemAudioActive.value = hybridAudioSource?.state?.value !is HybridAudioSource.State.CapturingMicOnly
-                Log.i(TAG, "System audio capture enabled: ${_systemAudioActive.value}")
+            val success = systemAudioMixer?.initialize(resultCode, data) == true
+            if (success) {
+                _systemAudioActive.value = true
+                Log.i(TAG, "System audio capture enabled successfully")
                 return true
             } else {
-                Log.e(TAG, "Failed to start HybridAudioSource")
+                Log.e(TAG, "Failed to initialize SystemAudioMixer")
+                _systemAudioActive.value = false
                 return false
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error enabling system audio", e)
+            _systemAudioActive.value = false
             return false
         }
     }
@@ -148,10 +159,8 @@ class WebRtcManager(
      */
     fun disableSystemAudio() {
         Log.d(TAG, "Disabling system audio")
-        hybridAudioSource?.stop()
-        hybridAudioSource = null
-        mediaProjection?.stop()
-        mediaProjection = null
+        systemAudioMixer?.release()
+        systemAudioMixer = null
         _systemAudioActive.value = false
     }
 
@@ -532,15 +541,8 @@ class WebRtcManager(
         localAudioTrack?.dispose()
         localAudioTrack = null
         
-        systemAudioTrack?.setEnabled(false)
-        systemAudioTrack?.dispose()
-        systemAudioTrack = null
-        
         audioSource?.dispose()
         audioSource = null
-        
-        systemAudioSource?.dispose()
-        systemAudioSource = null
         
         peerConnection?.close()
         peerConnection = null
@@ -555,8 +557,13 @@ class WebRtcManager(
     fun release() {
         stopConnectionMonitoring()
         disconnect()
+        
+        audioDeviceModule?.release()
+        audioDeviceModule = null
+        
         peerConnectionFactory?.dispose()
         peerConnectionFactory = null
+        
         try {
             eglBase.release()
         } catch (e: Exception) {
