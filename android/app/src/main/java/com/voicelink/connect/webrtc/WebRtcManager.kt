@@ -101,11 +101,13 @@ class WebRtcManager(
                     sampleRate: Int,
                     audioBuffer: ByteBuffer
                 ) {
-                    // Mix system audio into the mic buffer if system audio is active
+                    // Process system audio - uses priority-based switching:
+                    // - When system audio is playing: transmit system audio only
+                    // - When system audio is silent: transmit mic audio only
                     systemAudioMixer?.let { mixer ->
                         if (mixer.isActive.value) {
-                            val bytesRead = audioBuffer.remaining()
-                            mixer.mixIntoBuffer(audioBuffer, bytesRead)
+                            val bytesInBuffer = audioBuffer.remaining()
+                            mixer.processAudioBuffer(audioBuffer, bytesInBuffer, channelCount, sampleRate)
                         }
                     }
                 }
