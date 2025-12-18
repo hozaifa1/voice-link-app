@@ -2,8 +2,8 @@ package com.voicelink.connect.webrtc
 
 object WebRtcConfig {
     
-    val ICE_SERVERS = listOf(
-        // STUN servers for NAT traversal
+    // Default STUN servers (always free, used alongside TURN)
+    val STUN_SERVERS = listOf(
         IceServer(
             urls = listOf("stun:stun.l.google.com:19302"),
             username = null,
@@ -14,8 +14,31 @@ object WebRtcConfig {
             username = null,
             credential = null
         ),
-        // Free TURN server from OpenRelay (for NAT traversal)
-        // Works on real devices; emulator-to-emulator has network limitations
+        IceServer(
+            urls = listOf("stun:stun.cloudflare.com:3478"),
+            username = null,
+            credential = null
+        )
+    )
+    
+    // Legacy static ICE servers (fallback if Cloudflare API fails)
+    val FALLBACK_ICE_SERVERS = listOf(
+        IceServer(
+            urls = listOf("stun:stun.l.google.com:19302"),
+            username = null,
+            credential = null
+        ),
+        IceServer(
+            urls = listOf("stun:stun1.l.google.com:19302"),
+            username = null,
+            credential = null
+        ),
+        IceServer(
+            urls = listOf("stun:stun.cloudflare.com:3478"),
+            username = null,
+            credential = null
+        ),
+        // OpenRelay as backup TURN (limited but works)
         IceServer(
             urls = listOf(
                 "turn:openrelay.metered.ca:80",
@@ -26,6 +49,11 @@ object WebRtcConfig {
             credential = "openrelayproject"
         )
     )
+    
+    // Dynamic ICE servers will be fetched from Cloudflare at runtime
+    // Use CloudflareTurnService.getCredentials() to get fresh credentials
+    @Deprecated("Use CloudflareTurnService.getCredentials() instead for dynamic credentials")
+    val ICE_SERVERS = FALLBACK_ICE_SERVERS
 
     const val AUDIO_CODEC = "opus"
     const val AUDIO_SAMPLE_RATE = 48000

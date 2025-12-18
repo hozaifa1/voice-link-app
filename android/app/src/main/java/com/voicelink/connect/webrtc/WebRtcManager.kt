@@ -385,8 +385,26 @@ class WebRtcManager(
         }
     }
 
-    private fun createPeerConnection(roomId: String) {
-        val iceServers = WebRtcConfig.ICE_SERVERS.map { server ->
+    private suspend fun fetchIceServers(): List<IceServer> {
+        // Try to get Cloudflare TURN credentials first
+        val cloudflareCredentials = CloudflareTurnService.getCredentials()
+        
+        return if (cloudflareCredentials != null) {
+            Log.i(TAG, "Using Cloudflare TURN servers (1TB free/month)")
+            // Combine STUN servers with Cloudflare TURN credentials
+            WebRtcConfig.STUN_SERVERS + cloudflareCredentials.iceServers
+        } else {
+            Log.w(TAG, "Cloudflare unavailable, using fallback servers")
+            WebRtcConfig.FALLBACK_ICE_SERVERS
+        }
+    }
+    
+    private suspend fun createPeerConnection(roomId: String) {
+        // Fetch fresh ICE servers (Cloudflare TURN + STUN)
+        val iceServerConfigs = fetchIceServers()
+        Log.d(TAG, "Using ${iceServerConfigs.size} ICE servers")
+        
+        val iceServers = iceServerConfigs.map { server ->
             PeerConnection.IceServer.builder(server.urls)
                 .apply {
                     server.username?.let { setUsername(it) }
@@ -398,6 +416,8 @@ class WebRtcManager(
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            // Enable ICE candidate trickling for faster connection
+            iceCandidatePoolSize = 10
         }
 
         val observer = object : PeerConnection.Observer {
