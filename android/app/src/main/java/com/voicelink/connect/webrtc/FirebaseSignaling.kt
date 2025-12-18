@@ -89,12 +89,16 @@ class FirebaseSignaling {
             "sdp" to offer.description
         )
         
-        firestore.collection(COLLECTION_ROOMS)
-            .document(roomId)
-            .update("offer", offerData)
-            .await()
-        
-        Log.d(TAG, "Offer sent successfully")
+        try {
+            firestore.collection(COLLECTION_ROOMS)
+                .document(roomId.uppercase())
+                .update("offer", offerData)
+                .await()
+            Log.d(TAG, "Offer sent successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send offer", e)
+            throw e
+        }
     }
 
     fun getOffer(roomId: String, callback: (SessionDescription?) -> Unit) {
@@ -150,7 +154,7 @@ class FirebaseSignaling {
         
         answerListener?.remove()
         answerListener = firestore.collection(COLLECTION_ROOMS)
-            .document(roomId)
+            .document(roomId.uppercase())
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e(TAG, "Error listening for answer", error)
@@ -186,11 +190,16 @@ class FirebaseSignaling {
             "candidate" to candidate.sdp
         )
         
-        firestore.collection(COLLECTION_ROOMS)
-            .document(roomId)
-            .collection(collection)
-            .add(candidateData)
-            .await()
+        try {
+            firestore.collection(COLLECTION_ROOMS)
+                .document(roomId.uppercase())
+                .collection(collection)
+                .add(candidateData)
+                .await()
+            Log.d(TAG, "ICE candidate sent successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send ICE candidate", e)
+        }
     }
 
     fun listenForIceCandidates(roomId: String, listenForCaller: Boolean, callback: (IceCandidate) -> Unit) {
