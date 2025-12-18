@@ -3,6 +3,7 @@ package com.voicelink.connect.webrtc
 object WebRtcConfig {
     
     val ICE_SERVERS = listOf(
+        // STUN servers for NAT traversal
         IceServer(
             urls = listOf("stun:stun.l.google.com:19302"),
             username = null,
@@ -13,10 +14,25 @@ object WebRtcConfig {
             username = null,
             credential = null
         ),
+        // Free public TURN servers from Metered (for testing/development)
+        // These are required for emulator-to-emulator connections
         IceServer(
-            urls = listOf("stun:stun2.l.google.com:19302"),
-            username = null,
-            credential = null
+            urls = listOf(
+                "turn:a.relay.metered.ca:80",
+                "turn:a.relay.metered.ca:80?transport=tcp",
+                "turn:a.relay.metered.ca:443",
+                "turns:a.relay.metered.ca:443"
+            ),
+            username = "e8dd65c92f8d9b7a47e4d810",
+            credential = "uWdEiPiN/kKOb2Jq"
+        ),
+        IceServer(
+            urls = listOf(
+                "turn:b.relay.metered.ca:80",
+                "turn:b.relay.metered.ca:80?transport=tcp"
+            ),
+            username = "e8dd65c92f8d9b7a47e4d810",
+            credential = "uWdEiPiN/kKOb2Jq"
         )
     )
 
