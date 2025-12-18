@@ -14,25 +14,16 @@ object WebRtcConfig {
             username = null,
             credential = null
         ),
-        // Free public TURN servers from Metered (for testing/development)
-        // These are required for emulator-to-emulator connections
+        // Free TURN server from OpenRelay (for NAT traversal)
+        // Works on real devices; emulator-to-emulator has network limitations
         IceServer(
             urls = listOf(
-                "turn:a.relay.metered.ca:80",
-                "turn:a.relay.metered.ca:80?transport=tcp",
-                "turn:a.relay.metered.ca:443",
-                "turns:a.relay.metered.ca:443"
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp"
             ),
-            username = "e8dd65c92f8d9b7a47e4d810",
-            credential = "uWdEiPiN/kKOb2Jq"
-        ),
-        IceServer(
-            urls = listOf(
-                "turn:b.relay.metered.ca:80",
-                "turn:b.relay.metered.ca:80?transport=tcp"
-            ),
-            username = "e8dd65c92f8d9b7a47e4d810",
-            credential = "uWdEiPiN/kKOb2Jq"
+            username = "openrelayproject",
+            credential = "openrelayproject"
         )
     )
 
