@@ -40,7 +40,6 @@ class FirebaseSignaling {
     private var renegotiationAnswerListener: ListenerRegistration? = null
     private var hdModeListener: ListenerRegistration? = null
     private var screenShareListener: ListenerRegistration? = null
-    private var displayRotationListener: ListenerRegistration? = null
     
     // Track offer/answer versions to detect renegotiation
     private var lastOfferVersion: Long = 0
@@ -49,7 +48,6 @@ class FirebaseSignaling {
     private var lastCalleeRenegotiationVersion: Long = 0
     private var lastHdModeVersion: Long = 0
     private var lastScreenShareVersion: Long = 0
-    private var lastDisplayRotationVersion: Long = 0
 
     suspend fun signInAnonymously(): Boolean {
         return try {
@@ -317,7 +315,6 @@ class FirebaseSignaling {
         renegotiationAnswerListener?.remove()
         hdModeListener?.remove()
         screenShareListener?.remove()
-        displayRotationListener?.remove()
         candidateListener = null
         answerListener = null
         offerListener = null
@@ -325,14 +322,12 @@ class FirebaseSignaling {
         renegotiationAnswerListener = null
         hdModeListener = null
         screenShareListener = null
-        displayRotationListener = null
         lastOfferVersion = 0
         lastAnswerVersion = 0
         lastCallerRenegotiationVersion = 0
         lastCalleeRenegotiationVersion = 0
         lastHdModeVersion = 0
         lastScreenShareVersion = 0
-        lastDisplayRotationVersion = 0
     }
 
     /**
@@ -439,62 +434,6 @@ class FirebaseSignaling {
                         lastScreenShareVersion = version
                         Log.d(TAG, "Screen share status: sharing=$isSharing, by=$sharerId")
                         callback(isSharing, sharerId)
-                    }
-                }
-            }
-    }
-    
-    /**
-     * Signal display rotation to the room.
-     * Rotation is in degrees: 0, 90, 180, 270.
-     * This is crucial for proper orientation sync in screen sharing.
-     */
-    suspend fun sendDisplayRotation(roomId: String, rotationDegrees: Int, senderId: String) {
-        Log.d(TAG, "Sending display rotation: $rotationDegrees degrees, by=$senderId")
-        
-        val rotationData = hashMapOf(
-            "rotation" to rotationDegrees,
-            "senderId" to senderId,
-            "version" to System.currentTimeMillis()
-        )
-        
-        try {
-            firestore.collection(COLLECTION_ROOMS)
-                .document(roomId.uppercase())
-                .update("displayRotation", rotationData)
-                .await()
-            Log.d(TAG, "Display rotation sent")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to send display rotation", e)
-        }
-    }
-    
-    /**
-     * Listen for display rotation changes from the remote peer.
-     * Returns: (rotationDegrees, senderId)
-     */
-    fun listenForDisplayRotation(roomId: String, callback: (Int, String) -> Unit) {
-        Log.d(TAG, "Listening for display rotation in room: $roomId")
-        
-        displayRotationListener?.remove()
-        displayRotationListener = firestore.collection(COLLECTION_ROOMS)
-            .document(roomId.uppercase())
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e(TAG, "Error listening for display rotation", error)
-                    return@addSnapshotListener
-                }
-                
-                val rotationData = snapshot?.get("displayRotation") as? Map<*, *>
-                if (rotationData != null) {
-                    val rotation = (rotationData["rotation"] as? Long)?.toInt() ?: 0
-                    val senderId = rotationData["senderId"] as? String ?: ""
-                    val version = (rotationData["version"] as? Long) ?: 0
-                    
-                    if (version > lastDisplayRotationVersion) {
-                        lastDisplayRotationVersion = version
-                        Log.d(TAG, "Display rotation change: $rotation degrees, by=$senderId")
-                        callback(rotation, senderId)
                     }
                 }
             }

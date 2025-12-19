@@ -1,65 +1,91 @@
-# Screen Sharing Orientation Synchronization Fix
+# Critical Fixes for Screen Sharing Issues
 
-## Problem
-When User A shares their screen in portrait mode but displays landscape content (e.g., fullscreen YouTube video), User B sees the content incorrectly:
-- User B sees portrait-shaped frames with landscape video in the middle
-- Black bars appear on top and bottom
-- Receiver orientation doesn't match sender's actual display orientation
+## Three Major Issues Fixed
 
-## Root Cause
-MediaProjection API captures frames in the device's **physical orientation**, not the content orientation. When User A's device is physically portrait but shows landscape content, the capture sends portrait-shaped frames (e.g., 720x1280). The landscape video is just rotated content within those portrait frames.
+### Issue 1: Landscape Video Shows with Black Bars in Fullscreen
+**Problem:** When sender shares landscape content (YouTube fullscreen), receiver sees black bars above/below the video instead of true fullscreen.
 
-Previous attempts failed because:
-1. Tried locking receiver orientation based on aspect ratio - but aspect ratio remains portrait (height > width)
-2. Tried preserving orientation in capture dimensions - but MediaProjection always captures in device orientation
-3. Video frames don't carry rotation metadata through WebRTC
+**Root Cause:** Using `SCALE_ASPECT_FIT` keeps entire video visible but doesn't fill screen when aspect ratios differ.
 
-## Solution
-Implemented a **rotation metadata signaling system** that transmits the sender's display rotation separately:
+**Solution:** Changed to `SCALE_ASPECT_FILL` in fullscreen mode - fills entire screen by cropping edges if needed.
 
-### 1. Firebase Signaling (FirebaseSignaling.kt)
-- Added `sendDisplayRotation()` - sends rotation in degrees (0, 90, 180, 270)
-- Added `listenForDisplayRotation()` - receives rotation updates from remote peer
-- Rotation changes are tracked with versioning to prevent duplicate processing
+### Issue 2: Audio Leak - Sender Hears Both System Audio AND Remote Voice
+**Problem:** When User A shares system audio (video sound), User A hears both the video sound AND User B's voice mixed together.
 
-### 2. Sender Side (WebRtcManager.kt)
-- Added `startRotationMonitoring()` - monitors device rotation every 500ms
-- Added `getDisplayRotation()` - gets current display rotation from WindowManager
-- Rotation is sent to Firebase when it changes during screen sharing
-- Monitoring starts when screen share begins, stops when it ends
+**Root Cause:** System audio mixer replaces outgoing audio but doesn't mute incoming remote audio.
 
-### 3. Receiver Side (RoomScreen.kt)
-- Added `remoteDisplayRotation` state flow from WebRtcManager
-- **Fullscreen mode**: Locks receiver orientation based on sender's rotation
-  - 90° or 270° → Force landscape
-  - 0° or 180° → Force portrait
-- **Preview mode**: Uses rotation info for proper display keying
-- Views are re-keyed when sender rotation changes for proper layout
+**Solution:** 
+- Mute remote audio track when system audio becomes active
+- Unmute remote audio when system audio stops
+- This ensures only one audio source plays at a time
 
-## How It Works
-1. User A starts screen sharing
-2. Sender monitors display rotation (0°, 90°, 180°, 270°)
-3. Rotation changes are sent via Firebase in real-time
-4. User B receives rotation updates
-5. User B's device orientation is locked to match sender's orientation in fullscreen
-6. Result: User B sees exactly what User A sees, including orientation
+### Issue 3: HD Mode Causes Black Screen
+**Problem:** Enabling HD mode makes receiver's screen go completely black.
 
-## Key Features
-- Real-time rotation tracking (500ms polling)
-- Automatic receiver orientation locking in fullscreen
-- Works for both portrait ↔ landscape transitions
-- No impact on video quality or bitrate
-- Minimal latency (Firebase real-time updates)
+**Root Cause:** Restarting capture (stop + start) breaks the video stream entirely.
+
+**Solution:** 
+- Remove capture restart when HD mode changes
+- Only update video bitrate parameters
+- Capture continues without interruption
+
+## Rotation Monitoring Attempt (FAILED - Removed)
+Initial approach tried monitoring device rotation, but failed because:
+
+1. Device physical orientation doesn't change when apps rotate content internally
+2. YouTube fullscreen rotates content, not the device
+3. MediaProjection captures device orientation (always portrait), not content orientation
+
+**This approach was completely removed.**
+
+## Actual Solutions Implemented
+
+### 1. RoomScreen.kt Changes
+- Changed `SCALE_ASPECT_FIT` to `SCALE_ASPECT_FILL` in fullscreen and preview
+- Removed failed device orientation locking code
+- Simplified video view to use aspect-ratio-based keying
+
+### 2. WebRtcManager.kt Changes  
+**Audio Leak Fix:**
+- Added `remoteAudioTrack` reference tracking
+- Added `muteRemoteAudio()` method
+- Mute remote audio when `enableSystemAudio()` is called
+- Unmute remote audio when `disableSystemAudio()` is called
+- Immediate mute when remote audio track is received if system audio already active
+
+**HD Mode Fix:**
+- Made `restartCaptureWithNewSettings()` empty (no-op)
+- Only bitrate update happens when HD mode toggles
+- Capture continues uninterrupted
+
+### 3. FirebaseSignaling.kt Changes
+- Removed unused display rotation signaling methods
+- Cleaned up rotation-related listeners and version tracking
 
 ## Testing Instructions
-1. Open app on two devices (User A and User B)
-2. User A: Start screen sharing in portrait mode
-3. User A: Open YouTube, play landscape video, enter fullscreen
-4. User A's screen rotates to landscape
-5. **Expected**: User B's fullscreen view automatically rotates to landscape and displays correctly
-6. **Expected**: No black bars, full landscape display on User B
+
+### Test 1: Fullscreen Display (Landscape Content)
+1. User A: Share screen in portrait mode
+2. User A: Open YouTube, play landscape video, enter fullscreen
+3. User B: Tap video to enter fullscreen
+4. **Expected**: Video fills entire screen without black bars
+5. **Note**: Video may be slightly cropped on edges (this is correct behavior for FILL mode)
+
+### Test 2: Audio Isolation
+1. User A: Share screen and play video with sound
+2. **Expected**: User A hears ONLY video sound, not User B's voice
+3. **Expected**: User B hears ONLY video sound
+4. User A: Stop video/close app
+5. **Expected**: Both users can now hear each other's voices normally
+
+### Test 3: HD Mode
+1. User A: Share screen
+2. Either user: Toggle HD mode ON
+3. **Expected**: Video quality improves, screen stays visible (no black screen)
+4. Either user: Toggle HD mode OFF
+5. **Expected**: Video quality reduces, screen stays visible
 
 ## Files Modified
-- `FirebaseSignaling.kt` - Added rotation signaling methods
-- `WebRtcManager.kt` - Added rotation monitoring and state management
-- `RoomScreen.kt` - Added rotation-based orientation locking
+- `RoomScreen.kt` - Changed scaling mode to FILL, removed orientation locking
+- `WebRtcManager.kt` - Added remote audio muting, disabled capture restart
+- `FirebaseSignaling.kt` - Removed unused rotation signaling

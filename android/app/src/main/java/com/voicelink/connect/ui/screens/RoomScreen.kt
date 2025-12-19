@@ -99,7 +99,6 @@ fun RoomScreen(
     val isHdMode by webRtcManager.isHdMode.collectAsState()
     val remoteVideoAspectRatio by webRtcManager.remoteVideoAspectRatio.collectAsState()
     val remoteScreenShareActive by webRtcManager.remoteScreenShareActive.collectAsState()
-    val remoteDisplayRotation by webRtcManager.remoteDisplayRotation.collectAsState()
     
     // State for showing screen share warning dialog
     var showScreenShareWarning by remember { mutableStateOf(false) }
@@ -188,30 +187,6 @@ fun RoomScreen(
     if (isFullscreen && currentVideoTrack != null && screenState == RoomScreenState.Connected) {
         var controlsVisible by remember { mutableStateOf(true) }
         
-        // Determine if sender's screen is in landscape based on rotation
-        // 90° or 270° rotation means landscape orientation
-        val isSenderLandscape = remoteDisplayRotation == 90 || remoteDisplayRotation == 270
-        
-        // Lock receiver orientation to match sender's orientation
-        DisposableEffect(isSenderLandscape, remoteDisplayRotation) {
-            val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            
-            // Force receiver to match sender's orientation
-            activity?.requestedOrientation = if (isSenderLandscape) {
-                // Sender is landscape (rotated 90° or 270°)
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            } else {
-                // Sender is portrait (0° or 180°)
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-            }
-            
-            Log.d("RoomScreen", "Receiver orientation locked: ${if (isSenderLandscape) "LANDSCAPE" else "PORTRAIT"} (sender rotation: ${remoteDisplayRotation}°)")
-            
-            onDispose {
-                activity?.requestedOrientation = originalOrientation
-            }
-        }
-        
         // Hide system UI for true immersive fullscreen
         DisposableEffect(Unit) {
             val window = activity?.window
@@ -258,14 +233,13 @@ fun RoomScreen(
                     controlsVisible = !controlsVisible
                 }
         ) {
-            // Fullscreen video with rotation
+            // Fullscreen video - use SCALE_ASPECT_FILL to fill entire screen
             RemoteVideoView(
                 videoTrack = currentVideoTrack,
                 eglBase = webRtcManager.getEglBaseContext(),
                 modifier = Modifier.fillMaxSize(),
                 aspectRatio = remoteVideoAspectRatio,
-                displayRotation = remoteDisplayRotation,
-                scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FILL
             )
             
             // Controls overlay
@@ -418,7 +392,6 @@ fun RoomScreen(
                         screenShareActive = screenShareActive,
                         remoteVideoTrack = remoteVideoTrack,
                         remoteVideoAspectRatio = remoteVideoAspectRatio,
-                        remoteDisplayRotation = remoteDisplayRotation,
                         webRtcManager = webRtcManager,
                         isFullscreen = isFullscreen,
                         isVideoMuted = isVideoMuted,
@@ -791,7 +764,6 @@ private fun ColumnScope.ConnectedScreen(
     screenShareActive: Boolean,
     remoteVideoTrack: VideoTrack?,
     remoteVideoAspectRatio: Float,
-    remoteDisplayRotation: Int,
     webRtcManager: WebRtcManager,
     isFullscreen: Boolean,
     isVideoMuted: Boolean,
@@ -816,10 +788,7 @@ private fun ColumnScope.ConnectedScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Remote Video Display (if receiving video)
-        // Display with proper orientation based on sender's rotation
         if (remoteVideoTrack != null) {
-            // Sender is landscape if rotated 90° or 270°
-            val isSenderLandscape = remoteDisplayRotation == 90 || remoteDisplayRotation == 270
             val isPortraitVideo = remoteVideoAspectRatio < 1f
             Card(
                 modifier = Modifier
@@ -840,14 +809,13 @@ private fun ColumnScope.ConnectedScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Box {
-                    // Preview video - pass aspect ratio and rotation for proper handling
+                    // Preview video with SCALE_ASPECT_FILL for better display
                     RemoteVideoView(
                         videoTrack = remoteVideoTrack,
                         eglBase = webRtcManager.getEglBaseContext(),
                         modifier = Modifier.fillMaxSize(),
                         aspectRatio = remoteVideoAspectRatio,
-                        displayRotation = remoteDisplayRotation,
-                        scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                        scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FILL
                     )
                 
                 // Video controls overlay
@@ -1080,16 +1048,10 @@ private fun RemoteVideoView(
     eglBase: org.webrtc.EglBase,
     modifier: Modifier = Modifier,
     aspectRatio: Float = 16f / 9f,
-    displayRotation: Int = 0, // Rotation from sender in degrees (0, 90, 180, 270)
-    scalingType: RendererCommon.ScalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
+    scalingType: RendererCommon.ScalingType = RendererCommon.ScalingType.SCALE_ASPECT_FILL
 ) {
-    // Determine orientation based on sender's rotation
-    // 90° or 270° means sender is in landscape
-    val isSenderLandscape = displayRotation == 90 || displayRotation == 270
-    
-    // Key the view by sender's rotation to force recreation when orientation changes
-    // This ensures proper display when sender rotates their device
-    key(isSenderLandscape, displayRotation) {
+    // Simple keying by aspect ratio for view recreation
+    key(aspectRatio) {
         var surfaceViewRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
         
         DisposableEffect(videoTrack) {
