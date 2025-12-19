@@ -89,6 +89,7 @@ fun RoomScreen(
     val screenShareActive by webRtcManager.screenShareActive.collectAsState()
     val remoteVideoTrack by webRtcManager.remoteVideoTrack.collectAsState()
     val isHdMode by webRtcManager.isHdMode.collectAsState()
+    val remoteVideoAspectRatio by webRtcManager.remoteVideoAspectRatio.collectAsState()
     
     // MediaProjection launcher for system audio sharing
     val audioProjectionLauncher = rememberLauncherForActivityResult(
@@ -246,6 +247,7 @@ fun RoomScreen(
                         systemAudioActive = systemAudioActive,
                         screenShareActive = screenShareActive,
                         remoteVideoTrack = remoteVideoTrack,
+                        remoteVideoAspectRatio = remoteVideoAspectRatio,
                         webRtcManager = webRtcManager,
                         isFullscreen = isFullscreen,
                         isVideoMuted = isVideoMuted,
@@ -584,6 +586,7 @@ private fun ColumnScope.ConnectedScreen(
     systemAudioActive: Boolean,
     screenShareActive: Boolean,
     remoteVideoTrack: VideoTrack?,
+    remoteVideoAspectRatio: Float,
     webRtcManager: WebRtcManager,
     isFullscreen: Boolean,
     isVideoMuted: Boolean,
@@ -661,11 +664,24 @@ private fun ColumnScope.ConnectedScreen(
     }
     
     // Remote Video Display (if receiving video)
+    // Dynamically adapt to portrait or landscape based on incoming video stream
     if (remoteVideoTrack != null) {
+        val isPortraitVideo = remoteVideoAspectRatio < 1f
         Card(
             modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .then(
+                    if (isPortraitVideo) {
+                        // Portrait video: limit height and use aspect ratio
+                        Modifier
+                            .fillMaxWidth(0.6f)
+                            .aspectRatio(remoteVideoAspectRatio)
+                    } else {
+                        // Landscape video: fill width and use aspect ratio
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(remoteVideoAspectRatio)
+                    }
+                )
                 .clickable { onToggleFullscreen() },
             shape = RoundedCornerShape(12.dp)
         ) {
@@ -775,27 +791,35 @@ private fun ColumnScope.ConnectedScreen(
     Spacer(modifier = Modifier.height(24.dp))
     
     // Control buttons - Share Screen, Share Audio, HD toggle
-    Row(
+    // Improved layout with proper spacing to prevent overlap
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Share Screen button (shares screen + audio)
-        ShareButton(
-            icon = if (screenShareActive) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
-            label = if (screenShareActive) "Stop" else "Share Screen",
-            isActive = screenShareActive,
-            onClick = onToggleShareScreen
-        )
+        // First row: Share Screen and Share Audio
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+        ) {
+            // Share Screen button (shares screen + audio)
+            ShareButton(
+                icon = if (screenShareActive) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
+                label = if (screenShareActive) "Stop Screen" else "Share Screen",
+                isActive = screenShareActive,
+                onClick = onToggleShareScreen
+            )
+            
+            // Share Audio button (shares audio only)
+            ShareButton(
+                icon = if (systemAudioActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                label = if (systemAudioActive) "Stop Audio" else "Share Audio",
+                isActive = systemAudioActive,
+                onClick = onToggleShareAudio
+            )
+        }
         
-        // Share Audio button (shares audio only)
-        ShareButton(
-            icon = if (systemAudioActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-            label = if (systemAudioActive) "Stop Audio" else "Share Audio",
-            isActive = systemAudioActive,
-            onClick = onToggleShareAudio
-        )
-        
-        // HD toggle button (premium feature)
+        // Second row: HD toggle
         ShareButton(
             icon = Icons.Default.Hd,
             label = if (isHdMode) "HD On" else "HD Off",

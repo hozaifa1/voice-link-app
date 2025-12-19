@@ -55,6 +55,13 @@ class WebRtcManager(
     private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
     
+    // Remote video aspect ratio (width/height) - used to adapt video view size
+    private val _remoteVideoAspectRatio = MutableStateFlow(16f / 9f)
+    val remoteVideoAspectRatio: StateFlow<Float> = _remoteVideoAspectRatio.asStateFlow()
+    
+    // VideoSink to track remote video dimensions
+    private var dimensionTrackingSink: VideoSink? = null
+    
     // HD quality mode
     private val _isHdMode = MutableStateFlow(false)
     val isHdMode: StateFlow<Boolean> = _isHdMode.asStateFlow()
@@ -510,6 +517,24 @@ class WebRtcManager(
                     "video" -> {
                         val videoTrack = receiver.track() as? VideoTrack
                         videoTrack?.setEnabled(true)
+                        
+                        // Add a sink to track video dimensions for aspect ratio
+                        dimensionTrackingSink?.let { oldSink ->
+                            _remoteVideoTrack.value?.removeSink(oldSink)
+                        }
+                        dimensionTrackingSink = VideoSink { frame ->
+                            val width = frame.rotatedWidth
+                            val height = frame.rotatedHeight
+                            if (width > 0 && height > 0) {
+                                val newRatio = width.toFloat() / height.toFloat()
+                                if (_remoteVideoAspectRatio.value != newRatio) {
+                                    _remoteVideoAspectRatio.value = newRatio
+                                    Log.d(TAG, "Remote video dimensions: ${width}x${height}, aspect ratio: $newRatio")
+                                }
+                            }
+                        }
+                        videoTrack?.addSink(dimensionTrackingSink)
+                        
                         _remoteVideoTrack.value = videoTrack
                         Log.d(TAG, "Remote video track received and enabled")
                     }
@@ -798,7 +823,14 @@ class WebRtcManager(
         _remoteAudioActive.value = false
         _systemAudioActive.value = false
         _screenShareActive.value = false
+        
+        // Clean up dimension tracking sink
+        dimensionTrackingSink?.let { sink ->
+            _remoteVideoTrack.value?.removeSink(sink)
+        }
+        dimensionTrackingSink = null
         _remoteVideoTrack.value = null
+        _remoteVideoAspectRatio.value = 16f / 9f // Reset to default
     }
 
     fun release() {
