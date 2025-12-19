@@ -429,6 +429,10 @@ class WebRtcManager(
             // Apply bitrate settings based on current HD mode
             updateVideoBitrate(_isHdMode.value)
             
+            // Enable system audio capture using the same MediaProjection
+            // This ensures share video + share audio work together
+            enableSystemAudio(resultCode, data)
+            
             // Signal screen share status to remote peer
             currentRoomId?.let { roomId ->
                 scope.launch {
@@ -844,10 +848,48 @@ class WebRtcManager(
         _remoteSharerId.value = if (isSharing) sharerId else null
         
         // If remote started sharing and we're also sharing, stop our sharing
+        // Use disableScreenShareSilent to avoid triggering renegotiation (remote will handle it)
         if (isSharing && sharerId != myId && _screenShareActive.value) {
-            Log.d(TAG, "Remote peer started sharing, stopping local share")
-            disableScreenShare()
+            Log.d(TAG, "Remote peer started sharing, stopping local share silently")
+            disableScreenShareSilent()
         }
+    }
+    
+    /**
+     * Disable screen sharing without triggering renegotiation.
+     * Used when remote peer starts sharing and we need to auto-stop.
+     */
+    private fun disableScreenShareSilent() {
+        Log.d(TAG, "Disabling screen share silently (no renegotiation)")
+        
+        screenCaptureManager?.release()
+        screenCaptureManager = null
+        
+        localVideoTrack?.let { track ->
+            track.setEnabled(false)
+            peerConnection?.senders?.find { it.track()?.id() == track.id() }?.let { sender ->
+                peerConnection?.removeTrack(sender)
+            }
+            track.dispose()
+        }
+        localVideoTrack = null
+        
+        localVideoSource?.dispose()
+        localVideoSource = null
+        
+        _screenShareActive.value = false
+        
+        // Also stop system audio when auto-stopping
+        disableSystemAudio()
+        
+        // Signal screen share stopped to remote peer
+        currentRoomId?.let { roomId ->
+            scope.launch {
+                signaling.sendScreenShareStatus(roomId, false, signaling.getCurrentUserId())
+            }
+        }
+        
+        // DO NOT trigger renegotiation here - remote peer's renegotiation will handle it
     }
     
     /**

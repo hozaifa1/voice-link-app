@@ -7,6 +7,7 @@ import android.media.projection.MediaProjectionManager
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -660,7 +661,8 @@ private fun ColumnScope.ConnectedScreen(
     // Get context for orientation control
     val context = LocalContext.current
     
-    // Fullscreen video dialog with tap-to-hide controls and auto-rotation
+    // Fullscreen video - uses full-screen Box instead of Dialog for proper orientation rotation
+    // Dialog creates a separate window that doesn't rotate, Box is part of the activity window
     if (isFullscreen && remoteVideoTrack != null) {
         // State to track if controls are visible (hide after tap for immersive experience)
         var controlsVisible by remember { mutableStateOf(true) }
@@ -686,6 +688,11 @@ private fun ColumnScope.ConnectedScreen(
             }
         }
         
+        // Handle back press to exit fullscreen
+        BackHandler(enabled = true) {
+            onToggleFullscreen()
+        }
+        
         // Auto-hide controls after 3 seconds
         LaunchedEffect(controlsVisible) {
             if (controlsVisible) {
@@ -694,85 +701,80 @@ private fun ColumnScope.ConnectedScreen(
             }
         }
         
-        Dialog(
-            onDismissRequest = onToggleFullscreen,
-            properties = DialogProperties(
-                dismissOnBackPress = true,
-                dismissOnClickOutside = false, // Don't dismiss on click, toggle controls instead
-                usePlatformDefaultWidth = false
-            )
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                    ) {
-                        // Toggle controls visibility on tap
-                        controlsVisible = !controlsVisible
-                    }
-            ) {
-                // Fullscreen video - use SCALE_ASPECT_FIT to properly display video
-                // Pass aspect ratio to force view recreation on orientation change
-                RemoteVideoView(
-                    videoTrack = remoteVideoTrack,
-                    eglBase = webRtcManager.getEglBaseContext(),
-                    modifier = Modifier.fillMaxSize(),
-                    aspectRatio = remoteVideoAspectRatio,
-                    scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
-                )
-                
-                // Video controls overlay - only show when controlsVisible is true
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = androidx.compose.animation.fadeIn(),
-                    exit = androidx.compose.animation.fadeOut(),
-                    modifier = Modifier.fillMaxSize()
+        // Full-screen Box overlay (not Dialog) - this rotates with the activity
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
+                    // Toggle controls visibility on tap
+                    controlsVisible = !controlsVisible
+                }
+        ) {
+            // Fullscreen video - use SCALE_ASPECT_FIT to properly display video
+            // Pass aspect ratio to force view recreation on orientation change
+            RemoteVideoView(
+                videoTrack = remoteVideoTrack,
+                eglBase = webRtcManager.getEglBaseContext(),
+                modifier = Modifier.fillMaxSize(),
+                aspectRatio = remoteVideoAspectRatio,
+                scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
+            )
+            
+            // Video controls overlay - only show when controlsVisible is true
+            androidx.compose.animation.AnimatedVisibility(
+                visible = controlsVisible,
+                enter = androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.fadeOut(),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Top bar - exit fullscreen
+                    IconButton(
+                        onClick = onToggleFullscreen,
+                        modifier = Modifier.align(Alignment.TopEnd)
                     ) {
-                        // Top bar - exit fullscreen
-                        IconButton(
-                            onClick = onToggleFullscreen,
-                            modifier = Modifier.align(Alignment.TopEnd)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FullscreenExit,
-                                contentDescription = "Exit Fullscreen",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
+                        Icon(
+                            imageVector = Icons.Default.FullscreenExit,
+                            contentDescription = "Exit Fullscreen",
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    
+                    // Bottom controls
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                color = Color.Black.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(24.dp)
                             )
-                        }
-                        
-                        // Bottom controls
-                        Row(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .background(
-                                    color = Color.Black.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(24.dp)
-                                )
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = onToggleVideoMute) {
-                                Icon(
-                                    imageVector = if (isVideoMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                                    contentDescription = if (isVideoMuted) "Unmute" else "Mute",
-                                    tint = Color.White
-                                )
-                            }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = onToggleVideoMute) {
+                            Icon(
+                                imageVector = if (isVideoMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                contentDescription = if (isVideoMuted) "Unmute" else "Mute",
+                                tint = Color.White
+                            )
                         }
                     }
                 }
             }
         }
+        
+        // Return early - don't show regular content when fullscreen
+        return
     }
     
     // Use a scrollable column for content to ensure disconnect button stays accessible
