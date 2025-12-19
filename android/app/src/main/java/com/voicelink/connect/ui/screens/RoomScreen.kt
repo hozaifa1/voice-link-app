@@ -183,7 +183,8 @@ fun RoomScreen(
     
     // FULLSCREEN MODE - Render outside of Scaffold for true fullscreen
     // This must be at the top level to cover the entire screen including status bar
-    if (isFullscreen && remoteVideoTrack != null && screenState == RoomScreenState.Connected) {
+    val currentVideoTrack = remoteVideoTrack // Capture for smart cast
+    if (isFullscreen && currentVideoTrack != null && screenState == RoomScreenState.Connected) {
         var controlsVisible by remember { mutableStateOf(true) }
         val isLandscapeVideo = remoteVideoAspectRatio > 1f
         
@@ -250,7 +251,7 @@ fun RoomScreen(
         ) {
             // Fullscreen video
             RemoteVideoView(
-                videoTrack = remoteVideoTrack,
+                videoTrack = currentVideoTrack,
                 eglBase = webRtcManager.getEglBaseContext(),
                 modifier = Modifier.fillMaxSize(),
                 aspectRatio = remoteVideoAspectRatio,
