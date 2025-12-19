@@ -535,6 +535,7 @@ fun RoomScreen(
                     )
                 }
             }
+        }
             
             // Screen share warning dialog
             if (showScreenShareWarning) {
@@ -1261,7 +1262,7 @@ private fun DisconnectedScreen(onRetry: () -> Unit) {
     }
 }
 
-private sealed class RoomScreenState {
+sealed class RoomScreenState {
     data object Initial : RoomScreenState()
     data object Creating : RoomScreenState()
     data object Joining : RoomScreenState()
@@ -1270,18 +1271,18 @@ private sealed class RoomScreenState {
     data object Disconnected : RoomScreenState()
 }
 
-private data class ParticipantNotification(
+data class ParticipantNotification(
     val message: String,
     val type: NotificationType,
     val timestamp: Long
 )
 
-private enum class NotificationType {
+enum class NotificationType {
     JOIN, LEAVE
 }
 
 @Composable
-private fun ParticipantNotificationBanner(
+fun ParticipantNotificationBanner(
     notification: ParticipantNotification,
     modifier: Modifier = Modifier
 ) {
