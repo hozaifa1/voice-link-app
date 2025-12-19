@@ -80,6 +80,10 @@ class WebRtcManager(
     private val _remoteVideoAspectRatio = MutableStateFlow(16f / 9f)
     val remoteVideoAspectRatio: StateFlow<Float> = _remoteVideoAspectRatio.asStateFlow()
     
+    // Remote display rotation from sender (0, 90, 180, 270)
+    private val _remoteDisplayRotation = MutableStateFlow(0)
+    val remoteDisplayRotation: StateFlow<Int> = _remoteDisplayRotation.asStateFlow()
+    
     // VideoSink to track remote video dimensions
     private var dimensionTrackingSink: VideoSink? = null
 
@@ -109,10 +113,12 @@ class WebRtcManager(
     // ICE restart and connection monitoring
     private var iceRestartCount = 0
     private var connectionMonitorJob: Job? = null
+    private var rotationMonitorJob: Job? = null
     private var lastIceRestartTime = 0L
     private val maxIceRestarts = 3
     private val iceRestartCooldownMs = 5000L
     private val connectionCheckIntervalMs = 10000L
+    private var lastSentRotation = -1
 
     private val eglBase: EglBase by lazy { EglBase.create() }
     
@@ -362,6 +368,53 @@ class WebRtcManager(
     }
 
     /**
+     * Start monitoring device rotation and send updates to remote peer.
+     * This ensures the receiver displays the video in the correct orientation.
+     */
+    private fun startRotationMonitoring() {
+        rotationMonitorJob?.cancel()
+        rotationMonitorJob = scope.launch {
+            while (isActive) {
+                val rotation = getDisplayRotation()
+                
+                // Only send if rotation changed and we're sharing
+                if (rotation != lastSentRotation && _screenShareActive.value) {
+                    lastSentRotation = rotation
+                    currentRoomId?.let { roomId ->
+                        signaling.sendDisplayRotation(roomId, rotation, signaling.getCurrentUserId())
+                        Log.d(TAG, "Display rotation sent: $rotation degrees")
+                    }
+                }
+                
+                delay(500) // Check every 500ms
+            }
+        }
+    }
+    
+    /**
+     * Stop monitoring device rotation.
+     */
+    private fun stopRotationMonitoring() {
+        rotationMonitorJob?.cancel()
+        rotationMonitorJob = null
+        lastSentRotation = -1
+    }
+    
+    /**
+     * Get current display rotation in degrees (0, 90, 180, 270).
+     */
+    private fun getDisplayRotation(): Int {
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+        return when (windowManager?.defaultDisplay?.rotation) {
+            android.view.Surface.ROTATION_0 -> 0
+            android.view.Surface.ROTATION_90 -> 90
+            android.view.Surface.ROTATION_180 -> 180
+            android.view.Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+    }
+    
+    /**
      * Enable screen sharing with system audio.
      * This method handles the MediaProjection properly to share it between
      * screen capture and audio capture.
@@ -432,6 +485,9 @@ class WebRtcManager(
             // Enable system audio capture using the same MediaProjection
             // This ensures share video + share audio work together
             enableSystemAudio(resultCode, data)
+            
+            // Start monitoring and sending display rotation
+            startRotationMonitoring()
             
             // Signal screen share status to remote peer
             currentRoomId?.let { roomId ->
@@ -518,6 +574,9 @@ class WebRtcManager(
             // Apply bitrate settings based on current HD mode
             updateVideoBitrate(_isHdMode.value)
             
+            // Start monitoring and sending display rotation
+            startRotationMonitoring()
+            
             // Trigger renegotiation to add video to the session
             triggerRenegotiation()
             
@@ -536,6 +595,9 @@ class WebRtcManager(
      */
     fun disableScreenShare() {
         Log.d(TAG, "Disabling screen share")
+        
+        // Stop rotation monitoring
+        stopRotationMonitoring()
         
         screenCaptureManager?.release()
         screenCaptureManager = null
@@ -835,6 +897,25 @@ class WebRtcManager(
         signaling.listenForScreenShareStatus(roomId) { isSharing, sharerId ->
             handleRemoteScreenShareStatus(isSharing, sharerId)
         }
+        
+        // Listen for display rotation changes from remote peer
+        signaling.listenForDisplayRotation(roomId) { rotation, senderId ->
+            handleRemoteDisplayRotation(rotation, senderId)
+        }
+    }
+    
+    /**
+     * Handle display rotation update from remote peer.
+     * Updates the rotation state so receiver can apply proper transformation.
+     */
+    private fun handleRemoteDisplayRotation(rotation: Int, senderId: String) {
+        val myId = signaling.getCurrentUserId()
+        
+        // Only apply if it's from the remote peer (not our own signal)
+        if (senderId != myId) {
+            _remoteDisplayRotation.value = rotation
+            Log.d(TAG, "Remote display rotation updated: $rotation degrees")
+        }
     }
     
     /**
@@ -861,6 +942,9 @@ class WebRtcManager(
      */
     private fun disableScreenShareSilent() {
         Log.d(TAG, "Disabling screen share silently (no renegotiation)")
+        
+        // Stop rotation monitoring
+        stopRotationMonitoring()
         
         screenCaptureManager?.release()
         screenCaptureManager = null
@@ -1132,6 +1216,7 @@ class WebRtcManager(
         Log.d(TAG, "Disconnecting")
         
         stopConnectionMonitoring()
+        stopRotationMonitoring()
         disableScreenShare()
         disableSystemAudio()
         
@@ -1165,10 +1250,12 @@ class WebRtcManager(
         dimensionTrackingSink = null
         _remoteVideoTrack.value = null
         _remoteVideoAspectRatio.value = 16f / 9f // Reset to default
+        _remoteDisplayRotation.value = 0 // Reset rotation
     }
 
     fun release() {
         stopConnectionMonitoring()
+        stopRotationMonitoring()
         disconnect()
         
         audioDeviceModule?.release()
