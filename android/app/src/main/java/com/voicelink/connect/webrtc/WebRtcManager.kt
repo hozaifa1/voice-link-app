@@ -61,6 +61,17 @@ class WebRtcManager(
 
     private val _screenShareActive = MutableStateFlow(false)
     val screenShareActive: StateFlow<Boolean> = _screenShareActive.asStateFlow()
+    
+    // Remote screen share status - true if remote peer is sharing
+    private val _remoteScreenShareActive = MutableStateFlow(false)
+    val remoteScreenShareActive: StateFlow<Boolean> = _remoteScreenShareActive.asStateFlow()
+    
+    // Remote sharer ID - to know who is currently sharing
+    private val _remoteSharerId = MutableStateFlow<String?>(null)
+    val remoteSharerId: StateFlow<String?> = _remoteSharerId.asStateFlow()
+    
+    private val _isHdMode = MutableStateFlow(false)
+    val isHdMode: StateFlow<Boolean> = _isHdMode.asStateFlow()
 
     private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
@@ -71,10 +82,6 @@ class WebRtcManager(
     
     // VideoSink to track remote video dimensions
     private var dimensionTrackingSink: VideoSink? = null
-    
-    // HD quality mode
-    private val _isHdMode = MutableStateFlow(false)
-    val isHdMode: StateFlow<Boolean> = _isHdMode.asStateFlow()
 
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
@@ -254,6 +261,7 @@ class WebRtcManager(
     /**
      * Set HD mode for screen sharing.
      * This updates both the capture resolution and the encoding bitrate.
+     * HD mode can be triggered by either party (sharer or viewer).
      */
     fun setHdMode(enabled: Boolean) {
         _isHdMode.value = enabled
@@ -262,9 +270,54 @@ class WebRtcManager(
         // Update bitrate on the video sender if screen share is active
         if (_screenShareActive.value) {
             updateVideoBitrate(enabled)
+            // Restart capture with new resolution
+            restartCaptureWithNewSettings()
+        }
+        
+        // Signal HD mode to remote peer via Firebase
+        currentRoomId?.let { roomId ->
+            scope.launch {
+                signaling.sendHdModeRequest(roomId, enabled, signaling.getCurrentUserId())
+            }
         }
         
         Log.d(TAG, "HD mode set to: $enabled")
+    }
+    
+    /**
+     * Handle HD mode request from remote peer.
+     * If we're the sharer, we should update our capture settings.
+     */
+    private fun handleRemoteHdModeRequest(enabled: Boolean, requestedBy: String) {
+        val myId = signaling.getCurrentUserId()
+        
+        // Only react if we're the sharer and the request is from the viewer
+        if (_screenShareActive.value && requestedBy != myId) {
+            Log.d(TAG, "Remote HD mode request: enabled=$enabled")
+            _isHdMode.value = enabled
+            screenCaptureManager?.setHdMode(enabled)
+            updateVideoBitrate(enabled)
+            restartCaptureWithNewSettings()
+        } else if (!_screenShareActive.value && requestedBy != myId) {
+            // We're the viewer, just update our local state
+            _isHdMode.value = enabled
+        }
+    }
+    
+    /**
+     * Restart capture with current settings (used when HD mode changes).
+     */
+    private fun restartCaptureWithNewSettings() {
+        val captureManager = screenCaptureManager ?: return
+        if (!captureManager.isCapturing.value) return
+        
+        try {
+            captureManager.stopCapture()
+            captureManager.startCapture()
+            Log.d(TAG, "Capture restarted with new settings")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error restarting capture", e)
+        }
     }
     
     /**
@@ -375,6 +428,13 @@ class WebRtcManager(
             
             // Apply bitrate settings based on current HD mode
             updateVideoBitrate(_isHdMode.value)
+            
+            // Signal screen share status to remote peer
+            currentRoomId?.let { roomId ->
+                scope.launch {
+                    signaling.sendScreenShareStatus(roomId, true, signaling.getCurrentUserId())
+                }
+            }
             
             // Trigger renegotiation to add video to the session
             triggerRenegotiation()
@@ -490,6 +550,13 @@ class WebRtcManager(
         localVideoSource = null
         
         _screenShareActive.value = false
+        
+        // Signal screen share stopped to remote peer
+        currentRoomId?.let { roomId ->
+            scope.launch {
+                signaling.sendScreenShareStatus(roomId, false, signaling.getCurrentUserId())
+            }
+        }
         
         // Trigger renegotiation to remove video from the session
         if (peerConnection != null && currentRoomId != null) {
@@ -754,6 +821,48 @@ class WebRtcManager(
             Log.d(TAG, "Renegotiation offer received")
             handleRenegotiationOffer(roomId, offer)
         }
+        
+        // Listen for HD mode changes from either party
+        signaling.listenForHdModeChanges(roomId) { enabled, requestedBy ->
+            handleRemoteHdModeRequest(enabled, requestedBy)
+        }
+        
+        // Listen for screen share status changes (for auto-stop feature)
+        signaling.listenForScreenShareStatus(roomId) { isSharing, sharerId ->
+            handleRemoteScreenShareStatus(isSharing, sharerId)
+        }
+    }
+    
+    /**
+     * Handle screen share status update from remote peer.
+     * Used to auto-stop local sharing when remote peer starts sharing.
+     */
+    private fun handleRemoteScreenShareStatus(isSharing: Boolean, sharerId: String) {
+        val myId = signaling.getCurrentUserId()
+        
+        _remoteScreenShareActive.value = isSharing
+        _remoteSharerId.value = if (isSharing) sharerId else null
+        
+        // If remote started sharing and we're also sharing, stop our sharing
+        if (isSharing && sharerId != myId && _screenShareActive.value) {
+            Log.d(TAG, "Remote peer started sharing, stopping local share")
+            disableScreenShare()
+        }
+    }
+    
+    /**
+     * Check if remote peer is currently sharing.
+     * Used to show warning before starting to share.
+     */
+    fun isRemotePeerSharing(): Boolean {
+        return _remoteScreenShareActive.value
+    }
+    
+    /**
+     * Get the ID of the current sharer (if any).
+     */
+    fun getCurrentSharerId(): String? {
+        return _remoteSharerId.value
     }
     
     /**

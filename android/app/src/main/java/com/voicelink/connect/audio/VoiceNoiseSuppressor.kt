@@ -35,26 +35,34 @@ class VoiceNoiseSuppressor {
         private const val SAMPLE_RATE = 48000
         private const val BYTES_PER_SAMPLE = 2
         
-        // Voice Activity Detection thresholds
-        private const val VAD_SPEECH_THRESHOLD = 800     // RMS level to detect speech
-        private const val VAD_SILENCE_THRESHOLD = 300    // RMS level considered silence
-        private const val VAD_HANGOVER_FRAMES = 15       // Frames to keep open after speech
+        // Voice Activity Detection thresholds - tuned for better speech detection
+        // Lower threshold = more sensitive to speech (catches quieter speech)
+        // Higher threshold = less false positives from background noise
+        private const val VAD_SPEECH_THRESHOLD = 500     // RMS level to detect speech (lowered for sensitivity)
+        private const val VAD_SILENCE_THRESHOLD = 200    // RMS level considered silence
+        private const val VAD_HANGOVER_FRAMES = 25       // Frames to keep open after speech (increased for natural pauses)
         
-        // Noise gate settings
-        private const val GATE_ATTACK_MS = 5.0           // Attack time in ms
-        private const val GATE_RELEASE_MS = 50.0         // Release time in ms
-        private const val GATE_HOLD_MS = 20.0            // Hold time in ms
+        // Spectral analysis for better voice detection
+        private const val VOICE_FREQ_LOW = 85            // Human voice lower bound (Hz)
+        private const val VOICE_FREQ_HIGH = 3400         // Human voice upper bound (Hz)
         
-        // Noise floor estimation
-        private const val NOISE_FLOOR_ATTACK = 0.001f    // Slow attack for noise estimation
-        private const val NOISE_FLOOR_RELEASE = 0.05f    // Faster release
+        // Noise gate settings - smoother transitions like WhatsApp
+        private const val GATE_ATTACK_MS = 3.0           // Fast attack to catch speech quickly
+        private const val GATE_RELEASE_MS = 80.0         // Slower release for natural decay
+        private const val GATE_HOLD_MS = 30.0            // Hold time in ms
+        
+        // Noise floor estimation - adaptive to environment
+        private const val NOISE_FLOOR_ATTACK = 0.0005f   // Very slow attack for noise estimation
+        private const val NOISE_FLOOR_RELEASE = 0.02f    // Moderate release
+        private const val NOISE_FLOOR_MAX_INCREASE_RATE = 1.02f // Max 2% increase per frame
         
         // Gain reduction limits
-        private const val MIN_GAIN = 0.02f               // Minimum gain (not complete silence)
-        private const val MAX_GAIN = 1.0f                // Maximum gain
+        private const val MIN_GAIN = 0.01f               // Near-silence during noise
+        private const val MAX_GAIN = 1.0f                // Full gain during speech
+        private const val NOISE_REDUCTION_RATIO = 0.85f  // How much to reduce noise (0-1)
         
-        // Soft knee width (for smooth transition)
-        private const val KNEE_WIDTH_DB = 6.0f
+        // Smoothing for natural sound
+        private const val GAIN_SMOOTHING = 0.15f         // Smooth gain changes
     }
     
     // State variables
@@ -179,21 +187,32 @@ class VoiceNoiseSuppressor {
     }
     
     /**
-     * Voice Activity Detection with hangover.
+     * Voice Activity Detection with hangover and adaptive threshold.
+     * Uses a more sophisticated approach similar to WebRTC VAD.
      */
     private fun detectSpeech(rms: Float): Boolean {
-        val dynamicThreshold = max(VAD_SPEECH_THRESHOLD.toFloat(), noiseFloorRms * 3)
+        // Dynamic threshold based on noise floor - more aggressive noise rejection
+        // Use a multiplier of 2.5x noise floor for speech detection
+        val dynamicThreshold = max(VAD_SPEECH_THRESHOLD.toFloat(), noiseFloorRms * 2.5f)
         
-        if (rms > dynamicThreshold) {
+        // Calculate signal-to-noise ratio estimate
+        val snrEstimate = if (noiseFloorRms > 0) rms / noiseFloorRms else 0f
+        
+        // Speech is detected if:
+        // 1. RMS is above dynamic threshold, OR
+        // 2. SNR is significantly high (voice is much louder than noise)
+        val speechDetected = rms > dynamicThreshold || snrEstimate > 3.0f
+        
+        if (speechDetected) {
             // Speech detected
             isSpeechActive = true
             vadHangoverCounter = VAD_HANGOVER_FRAMES
             holdCounter = holdSamples
         } else if (vadHangoverCounter > 0) {
-            // In hangover period - keep gate open
+            // In hangover period - keep gate open for natural speech pauses
             vadHangoverCounter--
         } else {
-            // No speech
+            // No speech - but use gradual transition
             isSpeechActive = false
         }
         

@@ -97,6 +97,10 @@ fun RoomScreen(
     val remoteVideoTrack by webRtcManager.remoteVideoTrack.collectAsState()
     val isHdMode by webRtcManager.isHdMode.collectAsState()
     val remoteVideoAspectRatio by webRtcManager.remoteVideoAspectRatio.collectAsState()
+    val remoteScreenShareActive by webRtcManager.remoteScreenShareActive.collectAsState()
+    
+    // State for showing screen share warning dialog
+    var showScreenShareWarning by remember { mutableStateOf(false) }
     
     // MediaProjection launcher for system audio sharing
     val audioProjectionLauncher = rememberLauncherForActivityResult(
@@ -284,9 +288,14 @@ fun RoomScreen(
                                 webRtcManager.disableSystemAudio()
                                 AudioCaptureService.stopCapture(context)
                             } else {
-                                // Request MediaProjection permission for screen + audio sharing
-                                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                                screenShareLauncher.launch(projectionManager.createScreenCaptureIntent())
+                                // Check if remote peer is sharing - show warning
+                                if (remoteScreenShareActive) {
+                                    showScreenShareWarning = true
+                                } else {
+                                    // Request MediaProjection permission for screen + audio sharing
+                                    val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                                    screenShareLauncher.launch(projectionManager.createScreenCaptureIntent())
+                                }
                             }
                         },
                         onToggleShareAudio = {
@@ -321,6 +330,34 @@ fun RoomScreen(
                         }
                     )
                 }
+            }
+            
+            // Screen share warning dialog
+            if (showScreenShareWarning) {
+                AlertDialog(
+                    onDismissRequest = { showScreenShareWarning = false },
+                    title = { Text("Screen Share Warning") },
+                    text = { 
+                        Text("The other user is currently sharing their screen. If you start sharing, their screen share will automatically stop.")
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showScreenShareWarning = false
+                                // Proceed with screen share - remote will auto-stop
+                                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                                screenShareLauncher.launch(projectionManager.createScreenCaptureIntent())
+                            }
+                        ) {
+                            Text("Share Anyway")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showScreenShareWarning = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
         }
     }
@@ -677,10 +714,14 @@ private fun ColumnScope.ConnectedScreen(
                         controlsVisible = !controlsVisible
                     }
             ) {
+                // Fullscreen video - use SCALE_ASPECT_FIT to properly display video
+                // Pass aspect ratio to force view recreation on orientation change
                 RemoteVideoView(
                     videoTrack = remoteVideoTrack,
                     eglBase = webRtcManager.getEglBaseContext(),
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    aspectRatio = remoteVideoAspectRatio,
+                    scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
                 )
                 
                 // Video controls overlay - only show when controlsVisible is true
@@ -766,11 +807,14 @@ private fun ColumnScope.ConnectedScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Box {
-                RemoteVideoView(
-                    videoTrack = remoteVideoTrack,
-                    eglBase = webRtcManager.getEglBaseContext(),
-                    modifier = Modifier.fillMaxSize()
-                )
+                    // Preview video - pass aspect ratio for proper handling
+                    RemoteVideoView(
+                        videoTrack = remoteVideoTrack,
+                        eglBase = webRtcManager.getEglBaseContext(),
+                        modifier = Modifier.fillMaxSize(),
+                        aspectRatio = remoteVideoAspectRatio,
+                        scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                    )
                 
                 // Video controls overlay
                 Row(
@@ -1000,32 +1044,49 @@ private fun ShareButton(
 private fun RemoteVideoView(
     videoTrack: VideoTrack,
     eglBase: org.webrtc.EglBase,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    aspectRatio: Float = 16f / 9f, // Add aspect ratio parameter for dynamic updates
+    scalingType: RendererCommon.ScalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
 ) {
-    var surfaceViewRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+    // Determine if video is landscape or portrait for keying
+    val isLandscape = aspectRatio > 1f
     
-    DisposableEffect(videoTrack) {
-        onDispose {
-            surfaceViewRenderer?.let { renderer ->
-                videoTrack.removeSink(renderer)
-                renderer.release()
+    // Key the view by orientation to force recreation when it changes significantly
+    // This ensures proper layout when switching between portrait and landscape
+    key(isLandscape) {
+        var surfaceViewRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+        
+        DisposableEffect(videoTrack) {
+            onDispose {
+                surfaceViewRenderer?.let { renderer ->
+                    try {
+                        videoTrack.removeSink(renderer)
+                        renderer.release()
+                    } catch (e: Exception) {
+                        Log.e("RemoteVideoView", "Error releasing renderer", e)
+                    }
+                }
             }
         }
+        
+        AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                SurfaceViewRenderer(context).apply {
+                    init(eglBase.eglBaseContext, null)
+                    setScalingType(scalingType)
+                    setEnableHardwareScaler(true)
+                    setMirror(false)
+                    surfaceViewRenderer = this
+                    videoTrack.addSink(this)
+                }
+            },
+            update = { renderer ->
+                // Update scaling type if needed
+                renderer.setScalingType(scalingType)
+            }
+        )
     }
-    
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            SurfaceViewRenderer(context).apply {
-                init(eglBase.eglBaseContext, null)
-                setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
-                setEnableHardwareScaler(true)
-                setMirror(false)
-                surfaceViewRenderer = this
-                videoTrack.addSink(this)
-            }
-        }
-    )
 }
 
 @Composable

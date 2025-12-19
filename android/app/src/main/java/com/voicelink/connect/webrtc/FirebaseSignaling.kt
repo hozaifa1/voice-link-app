@@ -38,12 +38,16 @@ class FirebaseSignaling {
     private var offerListener: ListenerRegistration? = null
     private var renegotiationOfferListener: ListenerRegistration? = null
     private var renegotiationAnswerListener: ListenerRegistration? = null
+    private var hdModeListener: ListenerRegistration? = null
+    private var screenShareListener: ListenerRegistration? = null
     
     // Track offer/answer versions to detect renegotiation
     private var lastOfferVersion: Long = 0
     private var lastAnswerVersion: Long = 0
     private var lastCallerRenegotiationVersion: Long = 0
     private var lastCalleeRenegotiationVersion: Long = 0
+    private var lastHdModeVersion: Long = 0
+    private var lastScreenShareVersion: Long = 0
 
     suspend fun signInAnonymously(): Boolean {
         return try {
@@ -309,15 +313,137 @@ class FirebaseSignaling {
         offerListener?.remove()
         renegotiationOfferListener?.remove()
         renegotiationAnswerListener?.remove()
+        hdModeListener?.remove()
+        screenShareListener?.remove()
         candidateListener = null
         answerListener = null
         offerListener = null
         renegotiationOfferListener = null
         renegotiationAnswerListener = null
+        hdModeListener = null
+        screenShareListener = null
         lastOfferVersion = 0
         lastAnswerVersion = 0
         lastCallerRenegotiationVersion = 0
         lastCalleeRenegotiationVersion = 0
+        lastHdModeVersion = 0
+        lastScreenShareVersion = 0
+    }
+
+    /**
+     * Signal HD mode request to the room.
+     * Either party can request HD mode, and the sharer should respond.
+     */
+    suspend fun sendHdModeRequest(roomId: String, enabled: Boolean, requestedBy: String) {
+        Log.d(TAG, "Sending HD mode request: enabled=$enabled, by=$requestedBy")
+        
+        val hdData = hashMapOf(
+            "enabled" to enabled,
+            "requestedBy" to requestedBy,
+            "version" to System.currentTimeMillis()
+        )
+        
+        try {
+            firestore.collection(COLLECTION_ROOMS)
+                .document(roomId.uppercase())
+                .update("hdMode", hdData)
+                .await()
+            Log.d(TAG, "HD mode request sent")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send HD mode request", e)
+        }
+    }
+    
+    /**
+     * Listen for HD mode changes from either party.
+     */
+    fun listenForHdModeChanges(roomId: String, callback: (Boolean, String) -> Unit) {
+        Log.d(TAG, "Listening for HD mode changes in room: $roomId")
+        
+        hdModeListener?.remove()
+        hdModeListener = firestore.collection(COLLECTION_ROOMS)
+            .document(roomId.uppercase())
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error listening for HD mode", error)
+                    return@addSnapshotListener
+                }
+                
+                val hdData = snapshot?.get("hdMode") as? Map<*, *>
+                if (hdData != null) {
+                    val enabled = hdData["enabled"] as? Boolean ?: false
+                    val requestedBy = hdData["requestedBy"] as? String ?: ""
+                    val version = (hdData["version"] as? Long) ?: 0
+                    
+                    if (version > lastHdModeVersion) {
+                        lastHdModeVersion = version
+                        Log.d(TAG, "HD mode change: enabled=$enabled, by=$requestedBy")
+                        callback(enabled, requestedBy)
+                    }
+                }
+            }
+    }
+    
+    /**
+     * Signal screen sharing status to the room.
+     * Used to coordinate when both users try to share.
+     */
+    suspend fun sendScreenShareStatus(roomId: String, isSharing: Boolean, sharerId: String) {
+        Log.d(TAG, "Sending screen share status: sharing=$isSharing, by=$sharerId")
+        
+        val shareData = hashMapOf(
+            "isSharing" to isSharing,
+            "sharerId" to sharerId,
+            "version" to System.currentTimeMillis()
+        )
+        
+        try {
+            firestore.collection(COLLECTION_ROOMS)
+                .document(roomId.uppercase())
+                .update("screenShare", shareData)
+                .await()
+            Log.d(TAG, "Screen share status sent")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send screen share status", e)
+        }
+    }
+    
+    /**
+     * Listen for screen sharing status changes.
+     * Returns: (isSharing, sharerId)
+     */
+    fun listenForScreenShareStatus(roomId: String, callback: (Boolean, String) -> Unit) {
+        Log.d(TAG, "Listening for screen share status in room: $roomId")
+        
+        screenShareListener?.remove()
+        screenShareListener = firestore.collection(COLLECTION_ROOMS)
+            .document(roomId.uppercase())
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error listening for screen share", error)
+                    return@addSnapshotListener
+                }
+                
+                val shareData = snapshot?.get("screenShare") as? Map<*, *>
+                if (shareData != null) {
+                    val isSharing = shareData["isSharing"] as? Boolean ?: false
+                    val sharerId = shareData["sharerId"] as? String ?: ""
+                    val version = (shareData["version"] as? Long) ?: 0
+                    
+                    if (version > lastScreenShareVersion) {
+                        lastScreenShareVersion = version
+                        Log.d(TAG, "Screen share status: sharing=$isSharing, by=$sharerId")
+                        callback(isSharing, sharerId)
+                    }
+                }
+            }
+    }
+    
+    /**
+     * Get current user ID for identification.
+     */
+    fun getCurrentUserId(): String {
+        return auth.currentUser?.uid ?: "unknown"
     }
 
     private fun generateRoomCode(): String {
