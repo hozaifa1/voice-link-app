@@ -33,13 +33,17 @@ class WebRtcManager(
         private const val TAG = "WebRtcManager"
         
         // Bitrate constants for video quality
-        // SD quality: 720p @ 1.5 Mbps
-        private const val SD_MAX_BITRATE_BPS = 1_500_000
-        private const val SD_MIN_BITRATE_BPS = 500_000
+        // SD quality: 1080p @ 5 Mbps (good quality for screen sharing)
+        private const val SD_MAX_BITRATE_BPS = 5_000_000
+        private const val SD_MIN_BITRATE_BPS = 2_000_000
         
-        // HD quality: 1080p @ 4 Mbps
-        private const val HD_MAX_BITRATE_BPS = 4_000_000
-        private const val HD_MIN_BITRATE_BPS = 1_500_000
+        // HD quality: 1080p @ 10 Mbps (high quality for screen sharing)
+        private const val HD_MAX_BITRATE_BPS = 10_000_000
+        private const val HD_MIN_BITRATE_BPS = 4_000_000
+        
+        // Framerate limits for screen sharing
+        private const val SD_MAX_FRAMERATE = 24
+        private const val HD_MAX_FRAMERATE = 30
     }
 
     sealed class ConnectionState {
@@ -300,7 +304,7 @@ class WebRtcManager(
         // Update bitrate on the video sender if screen share is active
         if (_screenShareActive.value) {
             updateVideoBitrate(enabled)
-            // Restart capture with new resolution
+            // Restart capture with new resolution and framerate
             restartCaptureWithNewSettings()
         }
         
@@ -327,6 +331,7 @@ class WebRtcManager(
             _isHdMode.value = enabled
             screenCaptureManager?.setHdMode(enabled)
             updateVideoBitrate(enabled)
+            // Restart capture to apply new resolution and framerate
             restartCaptureWithNewSettings()
         } else if (!_screenShareActive.value && requestedBy != myId) {
             // We're the viewer, just update our local state
@@ -335,12 +340,30 @@ class WebRtcManager(
     }
     
     /**
-     * DO NOT restart capture when HD mode changes - it causes black screen.
-     * Only bitrate update is needed, which is handled in setHdMode().
+     * Restart screen capture with updated HD mode settings.
+     * This applies the new resolution and framerate for HD/SD quality.
      */
     private fun restartCaptureWithNewSettings() {
-        // Intentionally empty - do not restart capture
-        Log.d(TAG, "HD mode changed - bitrate updated, no capture restart needed")
+        val captureManager = screenCaptureManager ?: return
+        
+        Log.d(TAG, "Restarting capture with HD mode: ${_isHdMode.value}")
+        
+        try {
+            // Stop current capture
+            captureManager.stopCapture()
+            
+            // Small delay to ensure clean stop
+            Thread.sleep(100)
+            
+            // Start capture with new settings (HD mode already set)
+            if (!captureManager.startCapture()) {
+                Log.e(TAG, "Failed to restart capture with new settings")
+            } else {
+                Log.d(TAG, "Capture restarted successfully with new quality settings")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error restarting capture", e)
+        }
     }
     
     /**
@@ -368,13 +391,19 @@ class WebRtcManager(
             // Update bitrate for all encodings
             val maxBitrate = if (isHd) HD_MAX_BITRATE_BPS else SD_MAX_BITRATE_BPS
             val minBitrate = if (isHd) HD_MIN_BITRATE_BPS else SD_MIN_BITRATE_BPS
+            val maxFramerate = if (isHd) HD_MAX_FRAMERATE else SD_MAX_FRAMERATE
             
             for (encoding in parameters.encodings) {
                 encoding.maxBitrateBps = maxBitrate
                 encoding.minBitrateBps = minBitrate
-                // For screen sharing, prioritize resolution over frame rate
-                encoding.scaleResolutionDownBy = if (isHd) 1.0 else 1.5
+                encoding.maxFramerate = maxFramerate
+                // Don't scale down resolution - maintain full quality
+                encoding.scaleResolutionDownBy = 1.0
             }
+            
+            // Set degradation preference to maintain resolution quality
+            // This tells WebRTC to reduce framerate before reducing resolution
+            parameters.degradationPreference = DegradationPreference.MAINTAIN_RESOLUTION
             
             val success = videoSender.setParameters(parameters)
             Log.d(TAG, "Video bitrate updated: maxBitrate=${maxBitrate/1_000_000.0}Mbps, success=$success")

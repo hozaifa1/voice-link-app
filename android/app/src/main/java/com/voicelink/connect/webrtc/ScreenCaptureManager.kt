@@ -27,11 +27,11 @@ class ScreenCaptureManager(
     companion object {
         private const val TAG = "ScreenCaptureManager"
         
-        // SD quality settings (default - saves bandwidth)
-        private const val SD_MAX_DIMENSION = 720
+        // SD quality settings (good quality for screen sharing)
+        private const val SD_MAX_DIMENSION = 1080
         private const val SD_FPS = 24
         
-        // HD quality settings (premium - higher bandwidth)
+        // HD quality settings (high quality for screen sharing)
         private const val HD_MAX_DIMENSION = 1080
         private const val HD_FPS = 30
     }
