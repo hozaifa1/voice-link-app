@@ -186,6 +186,7 @@ fun RoomScreen(
     val currentVideoTrack = remoteVideoTrack // Capture for smart cast
     if (isFullscreen && currentVideoTrack != null && screenState == RoomScreenState.Connected) {
         var controlsVisible by remember { mutableStateOf(true) }
+        var videoRotation by remember { mutableStateOf(0) } // 0, 90, 180, 270
         
         // Hide system UI for true immersive fullscreen
         DisposableEffect(Unit) {
@@ -233,14 +234,20 @@ fun RoomScreen(
                     controlsVisible = !controlsVisible
                 }
         ) {
-            // Fullscreen video - use SCALE_ASPECT_FILL to fill entire screen
-            RemoteVideoView(
-                videoTrack = currentVideoTrack,
-                eglBase = webRtcManager.getEglBaseContext(),
-                modifier = Modifier.fillMaxSize(),
-                aspectRatio = remoteVideoAspectRatio,
-                scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FILL
-            )
+            // Fullscreen video with manual rotation control
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .rotate(videoRotation.toFloat())
+            ) {
+                RemoteVideoView(
+                    videoTrack = currentVideoTrack,
+                    eglBase = webRtcManager.getEglBaseContext(),
+                    modifier = Modifier.fillMaxSize(),
+                    aspectRatio = remoteVideoAspectRatio,
+                    scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                )
+            }
             
             // Controls overlay
             androidx.compose.animation.AnimatedVisibility(
@@ -254,17 +261,48 @@ fun RoomScreen(
                         .fillMaxSize()
                         .padding(16.dp)
                 ) {
-                    // Exit fullscreen button
-                    IconButton(
-                        onClick = { isFullscreen = false },
-                        modifier = Modifier.align(Alignment.TopEnd)
+                    // Top controls
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.FullscreenExit,
-                            contentDescription = "Exit Fullscreen",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        // Rotate button - tap to rotate video 90° clockwise
+                        IconButton(
+                            onClick = { 
+                                videoRotation = (videoRotation + 90) % 360
+                            },
+                            modifier = Modifier
+                                .background(
+                                    color = Color.Black.copy(alpha = 0.5f),
+                                    shape = CircleShape
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.RotateRight,
+                                contentDescription = "Rotate Video 90°",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        
+                        // Exit fullscreen button
+                        IconButton(
+                            onClick = { isFullscreen = false },
+                            modifier = Modifier
+                                .background(
+                                    color = Color.Black.copy(alpha = 0.5f),
+                                    shape = CircleShape
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FullscreenExit,
+                                contentDescription = "Exit Fullscreen",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                     
                     // Bottom controls
