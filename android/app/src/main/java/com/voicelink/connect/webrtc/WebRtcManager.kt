@@ -49,6 +49,11 @@ class WebRtcManager(
         data object Disconnected : ConnectionState()
         data class Failed(val error: String) : ConnectionState()
     }
+    
+    sealed class ParticipantEvent {
+        data class Joined(val userId: String, val timestamp: Long = System.currentTimeMillis()) : ParticipantEvent()
+        data class Left(val userId: String, val timestamp: Long = System.currentTimeMillis()) : ParticipantEvent()
+    }
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -69,6 +74,14 @@ class WebRtcManager(
     // Remote sharer ID - to know who is currently sharing
     private val _remoteSharerId = MutableStateFlow<String?>(null)
     val remoteSharerId: StateFlow<String?> = _remoteSharerId.asStateFlow()
+    
+    // Participant tracking
+    private val _participants = MutableStateFlow<List<FirebaseSignaling.Participant>>(emptyList())
+    val participants: StateFlow<List<FirebaseSignaling.Participant>> = _participants.asStateFlow()
+    
+    // Participant events (for notifications)
+    private val _participantEvent = MutableStateFlow<ParticipantEvent?>(null)
+    val participantEvent: StateFlow<ParticipantEvent?> = _participantEvent.asStateFlow()
     
     private val _isHdMode = MutableStateFlow(false)
     val isHdMode: StateFlow<Boolean> = _isHdMode.asStateFlow()
@@ -632,6 +645,38 @@ class WebRtcManager(
             }
         }
     }
+    
+    private var previousParticipants = emptyList<FirebaseSignaling.Participant>()
+    
+    private fun handleParticipantChanges(participants: List<FirebaseSignaling.Participant>) {
+        val myUserId = signaling.getCurrentUserId()
+        val activeParticipants = participants.filter { it.status == "joined" && it.userId != myUserId }
+        val previousActive = previousParticipants.filter { it.status == "joined" && it.userId != myUserId }
+        
+        // Detect new joins
+        val newJoins = activeParticipants.filter { participant ->
+            previousActive.none { it.userId == participant.userId }
+        }
+        
+        // Detect leaves
+        val newLeaves = previousActive.filter { participant ->
+            activeParticipants.none { it.userId == participant.userId }
+        }
+        
+        // Emit events
+        newJoins.forEach { participant ->
+            _participantEvent.value = ParticipantEvent.Joined(participant.userId)
+        }
+        
+        newLeaves.forEach { participant ->
+            _participantEvent.value = ParticipantEvent.Left(participant.userId)
+        }
+        
+        previousParticipants = participants
+        _participants.value = activeParticipants
+        
+        Log.d(TAG, "Participants updated: ${activeParticipants.size} active participants")
+    }
 
     fun joinRoom(roomId: String, onJoined: (Boolean) -> Unit) {
         isInitiator = false
@@ -647,6 +692,9 @@ class WebRtcManager(
                     onJoined(false)
                     return@launch
                 }
+                
+                // Register as participant
+                signaling.joinRoomAsParticipant(roomId)
                 
                 createPeerConnection(roomId)
                 
@@ -852,6 +900,11 @@ class WebRtcManager(
         // Listen for screen share status changes (for auto-stop feature)
         signaling.listenForScreenShareStatus(roomId) { isSharing, sharerId ->
             handleRemoteScreenShareStatus(isSharing, sharerId)
+        }
+        
+        // Listen for participant changes
+        signaling.listenForParticipants(roomId) { participants ->
+            handleParticipantChanges(participants)
         }
     }
     
@@ -1155,6 +1208,7 @@ class WebRtcManager(
         
         currentRoomId?.let { roomId ->
             scope.launch {
+                signaling.leaveRoomAsParticipant(roomId)
                 signaling.leaveRoom(roomId)
             }
         }
@@ -1175,6 +1229,9 @@ class WebRtcManager(
         _remoteAudioActive.value = false
         _systemAudioActive.value = false
         _screenShareActive.value = false
+        _participants.value = emptyList()
+        _participantEvent.value = null
+        previousParticipants = emptyList()
         
         // Clean up dimension tracking sink
         dimensionTrackingSink?.let { sink ->
@@ -1184,6 +1241,10 @@ class WebRtcManager(
         _remoteVideoTrack.value = null
         _remoteVideoAspectRatio.value = 16f / 9f // Reset to default
         remoteAudioTrack = null
+    }
+    
+    fun clearParticipantEvent() {
+        _participantEvent.value = null
     }
 
     fun release() {

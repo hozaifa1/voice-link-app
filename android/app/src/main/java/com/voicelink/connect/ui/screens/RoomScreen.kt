@@ -101,9 +101,17 @@ fun RoomScreen(
     val isHdMode by webRtcManager.isHdMode.collectAsState()
     val remoteVideoAspectRatio by webRtcManager.remoteVideoAspectRatio.collectAsState()
     val remoteScreenShareActive by webRtcManager.remoteScreenShareActive.collectAsState()
+    val participantEvent by webRtcManager.participantEvent.collectAsState()
+    val participants by webRtcManager.participants.collectAsState()
     
     // State for showing screen share warning dialog
     var showScreenShareWarning by remember { mutableStateOf(false) }
+    
+    // State for back button confirmation dialog
+    var showBackConfirmDialog by remember { mutableStateOf(false) }
+    
+    // Participant notification state
+    var participantNotification by remember { mutableStateOf<ParticipantNotification?>(null) }
     
     // MediaProjection launcher for system audio sharing
     val audioProjectionLauncher = rememberLauncherForActivityResult(
@@ -177,6 +185,33 @@ fun RoomScreen(
                 }
             }
             else -> {}
+        }
+    }
+    
+    // Handle participant events
+    LaunchedEffect(participantEvent) {
+        participantEvent?.let { event ->
+            when (event) {
+                is WebRtcManager.ParticipantEvent.Joined -> {
+                    participantNotification = ParticipantNotification(
+                        message = "Participant joined",
+                        type = NotificationType.JOIN,
+                        timestamp = event.timestamp
+                    )
+                    delay(3000)
+                    participantNotification = null
+                }
+                is WebRtcManager.ParticipantEvent.Left -> {
+                    participantNotification = ParticipantNotification(
+                        message = "Participant left",
+                        type = NotificationType.LEAVE,
+                        timestamp = event.timestamp
+                    )
+                    delay(3000)
+                    participantNotification = null
+                }
+            }
+            webRtcManager.clearParticipantEvent()
         }
     }
     
@@ -335,14 +370,23 @@ fun RoomScreen(
         return
     }
 
+    // Handle back button press with confirmation when connected
+    BackHandler(enabled = screenState == RoomScreenState.Connected) {
+        showBackConfirmDialog = true
+    }
+    
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("WebRTC Room") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        webRtcManager.disconnect()
-                        onBackClick()
+                        if (screenState == RoomScreenState.Connected) {
+                            showBackConfirmDialog = true
+                        } else {
+                            webRtcManager.disconnect()
+                            onBackClick()
+                        }
                     }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
@@ -350,13 +394,14 @@ fun RoomScreen(
             )
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
             when (screenState) {
                 RoomScreenState.Initial -> {
                     InitialScreen(
@@ -436,6 +481,7 @@ fun RoomScreen(
                         isFullscreen = isFullscreen,
                         isVideoMuted = isVideoMuted,
                         isHdMode = isHdMode,
+                        participantCount = participants.size,
                         onToggleFullscreen = { isFullscreen = !isFullscreen },
                         onToggleVideoMute = { isVideoMuted = !isVideoMuted },
                         onToggleHdMode = { webRtcManager.setHdMode(!isHdMode) },
@@ -515,6 +561,43 @@ fun RoomScreen(
                             Text("Cancel")
                         }
                     }
+                )
+            }
+            
+            // Back confirmation dialog
+            if (showBackConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showBackConfirmDialog = false },
+                    title = { Text("Leave Room?") },
+                    text = { Text("Are you sure you want to leave the room? This will disconnect the call.") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showBackConfirmDialog = false
+                                AudioCaptureService.stopCapture(context)
+                                WebRtcService.stop(context)
+                                webRtcManager.disconnect()
+                                onBackClick()
+                            }
+                        ) {
+                            Text("Leave")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showBackConfirmDialog = false }) {
+                            Text("Stay")
+                        }
+                    }
+                )
+            }
+            
+            // Participant notification overlay (top center, non-overlapping)
+            participantNotification?.let { notification ->
+                ParticipantNotificationBanner(
+                    notification = notification,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp)
                 )
             }
         }
@@ -808,6 +891,7 @@ private fun ColumnScope.ConnectedScreen(
     isFullscreen: Boolean,
     isVideoMuted: Boolean,
     isHdMode: Boolean,
+    participantCount: Int,
     onToggleFullscreen: () -> Unit,
     onToggleVideoMute: () -> Unit,
     onToggleHdMode: () -> Unit,
@@ -947,11 +1031,29 @@ private fun ColumnScope.ConnectedScreen(
                 color = MaterialTheme.colorScheme.primary
             )
         }
-        Text(
-            text = "Room: $roomCode",
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = "Room: $roomCode",
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "${participantCount + 1} in room",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
     
     Spacer(modifier = Modifier.height(24.dp))
@@ -1090,16 +1192,18 @@ private fun RemoteVideoView(
     aspectRatio: Float = 16f / 9f,
     scalingType: RendererCommon.ScalingType = RendererCommon.ScalingType.SCALE_ASPECT_FILL
 ) {
-    // Simple keying by aspect ratio for view recreation
-    key(aspectRatio) {
+    // Key by videoTrack id to force recreation when track changes
+    // This fixes the black screen bug when switching screen sharers
+    key(videoTrack.id()) {
         var surfaceViewRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
         
-        DisposableEffect(videoTrack) {
+        DisposableEffect(Unit) {
             onDispose {
                 surfaceViewRenderer?.let { renderer ->
                     try {
                         videoTrack.removeSink(renderer)
                         renderer.release()
+                        Log.d("RemoteVideoView", "Renderer released for track: ${videoTrack.id()}")
                     } catch (e: Exception) {
                         Log.e("RemoteVideoView", "Error releasing renderer", e)
                     }
@@ -1110,17 +1214,21 @@ private fun RemoteVideoView(
         AndroidView(
             modifier = modifier,
             factory = { context ->
+                Log.d("RemoteVideoView", "Creating new renderer for track: ${videoTrack.id()}")
                 SurfaceViewRenderer(context).apply {
                     init(eglBase.eglBaseContext, null)
                     setScalingType(scalingType)
                     setEnableHardwareScaler(true)
                     setMirror(false)
                     surfaceViewRenderer = this
+                    
+                    // Add sink to the video track
                     videoTrack.addSink(this)
+                    Log.d("RemoteVideoView", "Video sink added for track: ${videoTrack.id()}")
                 }
             },
             update = { renderer ->
-                // Update scaling type if needed
+                // Ensure scaling type is updated
                 renderer.setScalingType(scalingType)
             }
         )
@@ -1160,4 +1268,57 @@ private sealed class RoomScreenState {
     data object WaitingForPeer : RoomScreenState()
     data object Connected : RoomScreenState()
     data object Disconnected : RoomScreenState()
+}
+
+private data class ParticipantNotification(
+    val message: String,
+    val type: NotificationType,
+    val timestamp: Long
+)
+
+private enum class NotificationType {
+    JOIN, LEAVE
+}
+
+@Composable
+private fun ParticipantNotificationBanner(
+    notification: ParticipantNotification,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .padding(horizontal = 16.dp)
+            .widthIn(max = 300.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = when (notification.type) {
+                NotificationType.JOIN -> Color(0xFF4CAF50).copy(alpha = 0.95f)
+                NotificationType.LEAVE -> Color(0xFFFF9800).copy(alpha = 0.95f)
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = when (notification.type) {
+                    NotificationType.JOIN -> Icons.Default.PersonAdd
+                    NotificationType.LEAVE -> Icons.Default.PersonRemove
+                },
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(24.dp)
+            )
+            Text(
+                text = notification.message,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+        }
+    }
 }

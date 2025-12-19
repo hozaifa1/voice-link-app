@@ -40,6 +40,7 @@ class FirebaseSignaling {
     private var renegotiationAnswerListener: ListenerRegistration? = null
     private var hdModeListener: ListenerRegistration? = null
     private var screenShareListener: ListenerRegistration? = null
+    private var participantsListener: ListenerRegistration? = null
     
     // Track offer/answer versions to detect renegotiation
     private var lastOfferVersion: Long = 0
@@ -48,6 +49,7 @@ class FirebaseSignaling {
     private var lastCalleeRenegotiationVersion: Long = 0
     private var lastHdModeVersion: Long = 0
     private var lastScreenShareVersion: Long = 0
+    private var lastParticipantsVersion: Long = 0
 
     suspend fun signInAnonymously(): Boolean {
         return try {
@@ -68,9 +70,16 @@ class FirebaseSignaling {
         val roomId = generateRoomCode()
         Log.d(TAG, "Creating room: $roomId")
         
+        val userId = auth.currentUser?.uid ?: "unknown"
         val roomData = hashMapOf(
             "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-            "createdBy" to (auth.currentUser?.uid ?: "unknown")
+            "createdBy" to userId,
+            "participants" to hashMapOf(
+                userId to hashMapOf(
+                    "joinedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                    "status" to "joined"
+                )
+            )
         )
         
         firestore.collection(COLLECTION_ROOMS)
@@ -91,6 +100,46 @@ class FirebaseSignaling {
             .await()
         
         return doc.exists()
+    }
+    
+    suspend fun joinRoomAsParticipant(roomId: String) {
+        val userId = auth.currentUser?.uid ?: "unknown"
+        Log.d(TAG, "Joining room as participant: $roomId")
+        
+        try {
+            firestore.collection(COLLECTION_ROOMS)
+                .document(roomId.uppercase())
+                .update(
+                    "participants.$userId", hashMapOf(
+                        "joinedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                        "status" to "joined"
+                    ),
+                    "participantsVersion" to System.currentTimeMillis()
+                )
+                .await()
+            Log.d(TAG, "Joined room as participant successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to join as participant", e)
+        }
+    }
+    
+    suspend fun leaveRoomAsParticipant(roomId: String) {
+        val userId = auth.currentUser?.uid ?: "unknown"
+        Log.d(TAG, "Leaving room as participant: $roomId")
+        
+        try {
+            firestore.collection(COLLECTION_ROOMS)
+                .document(roomId.uppercase())
+                .update(
+                    "participants.$userId.status", "left",
+                    "participants.$userId.leftAt", com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                    "participantsVersion", System.currentTimeMillis()
+                )
+                .await()
+            Log.d(TAG, "Left room as participant successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to leave as participant", e)
+        }
     }
 
     suspend fun sendOffer(roomId: String, offer: SessionDescription, isRenegotiation: Boolean = false, isInitiator: Boolean = true) {
@@ -315,6 +364,7 @@ class FirebaseSignaling {
         renegotiationAnswerListener?.remove()
         hdModeListener?.remove()
         screenShareListener?.remove()
+        participantsListener?.remove()
         candidateListener = null
         answerListener = null
         offerListener = null
@@ -322,12 +372,14 @@ class FirebaseSignaling {
         renegotiationAnswerListener = null
         hdModeListener = null
         screenShareListener = null
+        participantsListener = null
         lastOfferVersion = 0
         lastAnswerVersion = 0
         lastCallerRenegotiationVersion = 0
         lastCalleeRenegotiationVersion = 0
         lastHdModeVersion = 0
         lastScreenShareVersion = 0
+        lastParticipantsVersion = 0
     }
 
     /**
@@ -445,6 +497,42 @@ class FirebaseSignaling {
     fun getCurrentUserId(): String {
         return auth.currentUser?.uid ?: "unknown"
     }
+    
+    fun listenForParticipants(roomId: String, callback: (List<Participant>) -> Unit) {
+        Log.d(TAG, "Listening for participants in room: $roomId")
+        
+        participantsListener?.remove()
+        participantsListener = firestore.collection(COLLECTION_ROOMS)
+            .document(roomId.uppercase())
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error listening for participants", error)
+                    return@addSnapshotListener
+                }
+                
+                val participantsData = snapshot?.get("participants") as? Map<*, *>
+                val version = (snapshot?.get("participantsVersion") as? Long) ?: 0
+                
+                if (participantsData != null && version > lastParticipantsVersion) {
+                    lastParticipantsVersion = version
+                    val participants = participantsData.map { (userId, data) ->
+                        val userMap = data as? Map<*, *>
+                        val status = userMap?.get("status") as? String ?: "unknown"
+                        Participant(
+                            userId = userId.toString(),
+                            status = status
+                        )
+                    }
+                    Log.d(TAG, "Participants updated: ${participants.size} total")
+                    callback(participants)
+                }
+            }
+    }
+    
+    data class Participant(
+        val userId: String,
+        val status: String
+    )
 
     private fun generateRoomCode(): String {
         val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
