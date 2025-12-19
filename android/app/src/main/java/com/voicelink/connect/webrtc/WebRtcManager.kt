@@ -296,34 +296,36 @@ class WebRtcManager(
 
     /**
      * Trigger SDP renegotiation when tracks are added/removed.
+     * Both initiator and non-initiator can trigger renegotiation.
      */
     private fun triggerRenegotiation() {
         val roomId = currentRoomId ?: return
+        val pc = peerConnection ?: return
         
-        if (isInitiator) {
-            // Create new offer with updated tracks
-            val constraints = MediaConstraints().apply {
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
-            }
-            
-            peerConnection?.createOffer(object : SdpObserver {
-                override fun onCreateSuccess(sdp: SessionDescription?) {
-                    sdp?.let {
-                        Log.d(TAG, "Renegotiation offer created")
-                        peerConnection?.setLocalDescription(SimpleSdpObserver("setLocalDescription (renegotiation)"), it)
-                        scope.launch {
-                            signaling.sendOffer(roomId, it)
-                        }
+        Log.d(TAG, "Triggering renegotiation (isInitiator: $isInitiator)")
+        
+        // Create new offer with updated tracks
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+        }
+        
+        pc.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(sdp: SessionDescription?) {
+                sdp?.let {
+                    Log.d(TAG, "Renegotiation offer created")
+                    pc.setLocalDescription(SimpleSdpObserver("setLocalDescription (renegotiation)"), it)
+                    scope.launch {
+                        signaling.sendOffer(roomId, it)
                     }
                 }
-                override fun onSetSuccess() {}
-                override fun onCreateFailure(error: String?) {
-                    Log.e(TAG, "Renegotiation offer failed: $error")
-                }
-                override fun onSetFailure(error: String?) {}
-            }, constraints)
-        }
+            }
+            override fun onSetSuccess() {}
+            override fun onCreateFailure(error: String?) {
+                Log.e(TAG, "Renegotiation offer failed: $error")
+            }
+            override fun onSetFailure(error: String?) {}
+        }, constraints)
     }
 
     fun createRoom(onRoomCreated: (String) -> Unit) {
@@ -517,16 +519,57 @@ class WebRtcManager(
             peerConnection?.addIceCandidate(candidate)
         }
         
-        // If we're the initiator, listen for answer
-        if (isInitiator) {
-            signaling.listenForAnswer(roomId) { answer ->
-                Log.d(TAG, "Answer received")
-                peerConnection?.setRemoteDescription(
-                    SimpleSdpObserver("setRemoteDescription (answer)"),
-                    answer
-                )
+        // Listen for answers (including renegotiation answers)
+        signaling.listenForAnswer(roomId) { answer ->
+            Log.d(TAG, "Answer received")
+            peerConnection?.setRemoteDescription(
+                SimpleSdpObserver("setRemoteDescription (answer)"),
+                answer
+            )
+        }
+        
+        // If we're not the initiator, listen for renegotiation offers
+        if (!isInitiator) {
+            signaling.listenForRenegotiationOffers(roomId) { offer ->
+                Log.d(TAG, "Renegotiation offer received")
+                handleRenegotiationOffer(roomId, offer)
             }
         }
+    }
+    
+    /**
+     * Handle a renegotiation offer from the remote peer.
+     */
+    private fun handleRenegotiationOffer(roomId: String, offer: SessionDescription) {
+        val pc = peerConnection ?: return
+        
+        pc.setRemoteDescription(
+            SimpleSdpObserver("setRemoteDescription (renegotiation offer)"),
+            offer
+        )
+        
+        // Create answer for the renegotiation offer
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+        }
+        
+        pc.createAnswer(object : SdpObserver {
+            override fun onCreateSuccess(sdp: SessionDescription?) {
+                sdp?.let {
+                    Log.d(TAG, "Renegotiation answer created")
+                    pc.setLocalDescription(SimpleSdpObserver("setLocalDescription (renegotiation answer)"), it)
+                    scope.launch {
+                        signaling.sendAnswer(roomId, it)
+                    }
+                }
+            }
+            override fun onSetSuccess() {}
+            override fun onCreateFailure(error: String?) {
+                Log.e(TAG, "Renegotiation answer failed: $error")
+            }
+            override fun onSetFailure(error: String?) {}
+        }, constraints)
     }
 
     private fun addLocalAudioTrack() {

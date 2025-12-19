@@ -36,6 +36,12 @@ class FirebaseSignaling {
     private var candidateListener: ListenerRegistration? = null
     private var answerListener: ListenerRegistration? = null
     private var offerListener: ListenerRegistration? = null
+    private var renegotiationOfferListener: ListenerRegistration? = null
+    private var renegotiationAnswerListener: ListenerRegistration? = null
+    
+    // Track offer/answer versions to detect renegotiation
+    private var lastOfferVersion: Long = 0
+    private var lastAnswerVersion: Long = 0
 
     suspend fun signInAnonymously(): Boolean {
         return try {
@@ -86,7 +92,8 @@ class FirebaseSignaling {
         
         val offerData = hashMapOf(
             "type" to offer.type.canonicalForm(),
-            "sdp" to offer.description
+            "sdp" to offer.description,
+            "version" to System.currentTimeMillis()
         )
         
         try {
@@ -138,7 +145,8 @@ class FirebaseSignaling {
         
         val answerData = hashMapOf(
             "type" to answer.type.canonicalForm(),
-            "sdp" to answer.description
+            "sdp" to answer.description,
+            "version" to System.currentTimeMillis()
         )
         
         firestore.collection(COLLECTION_ROOMS)
@@ -165,16 +173,50 @@ class FirebaseSignaling {
                 if (answerData != null) {
                     val type = answerData["type"] as? String
                     val sdp = answerData["sdp"] as? String
+                    val version = (answerData["version"] as? Long) ?: 0
                     
-                    if (type != null && sdp != null) {
+                    if (type != null && sdp != null && version > lastAnswerVersion) {
+                        lastAnswerVersion = version
                         val answer = SessionDescription(
                             SessionDescription.Type.fromCanonicalForm(type),
                             sdp
                         )
-                        Log.d(TAG, "Answer received")
-                        answerListener?.remove()
-                        answerListener = null
+                        Log.d(TAG, "Answer received (version: $version)")
                         callback(answer)
+                    }
+                }
+            }
+    }
+    
+    /**
+     * Listen for renegotiation offers (for non-initiator after initial connection).
+     */
+    fun listenForRenegotiationOffers(roomId: String, callback: (SessionDescription) -> Unit) {
+        Log.d(TAG, "Listening for renegotiation offers in room: $roomId")
+        
+        renegotiationOfferListener?.remove()
+        renegotiationOfferListener = firestore.collection(COLLECTION_ROOMS)
+            .document(roomId.uppercase())
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error listening for renegotiation offer", error)
+                    return@addSnapshotListener
+                }
+                
+                val offerData = snapshot?.get("offer") as? Map<*, *>
+                if (offerData != null) {
+                    val type = offerData["type"] as? String
+                    val sdp = offerData["sdp"] as? String
+                    val version = (offerData["version"] as? Long) ?: 0
+                    
+                    if (type != null && sdp != null && version > lastOfferVersion) {
+                        lastOfferVersion = version
+                        val offer = SessionDescription(
+                            SessionDescription.Type.fromCanonicalForm(type),
+                            sdp
+                        )
+                        Log.d(TAG, "Renegotiation offer received (version: $version)")
+                        callback(offer)
                     }
                 }
             }
@@ -250,9 +292,15 @@ class FirebaseSignaling {
         candidateListener?.remove()
         answerListener?.remove()
         offerListener?.remove()
+        renegotiationOfferListener?.remove()
+        renegotiationAnswerListener?.remove()
         candidateListener = null
         answerListener = null
         offerListener = null
+        renegotiationOfferListener = null
+        renegotiationAnswerListener = null
+        lastOfferVersion = 0
+        lastAnswerVersion = 0
     }
 
     private fun generateRoomCode(): String {
