@@ -54,6 +54,10 @@ class WebRtcManager(
 
     private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
+    
+    // HD quality mode
+    private val _isHdMode = MutableStateFlow(false)
+    val isHdMode: StateFlow<Boolean> = _isHdMode.asStateFlow()
 
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
@@ -191,6 +195,15 @@ class WebRtcManager(
         }
         screenCaptureManager?.storePermissionResult(resultCode, data)
     }
+    
+    /**
+     * Set HD mode for screen sharing.
+     */
+    fun setHdMode(enabled: Boolean) {
+        _isHdMode.value = enabled
+        screenCaptureManager?.setHdMode(enabled)
+        Log.d(TAG, "HD mode set to: $enabled")
+    }
 
     /**
      * Enable screen sharing.
@@ -316,7 +329,7 @@ class WebRtcManager(
                     Log.d(TAG, "Renegotiation offer created")
                     pc.setLocalDescription(SimpleSdpObserver("setLocalDescription (renegotiation)"), it)
                     scope.launch {
-                        signaling.sendOffer(roomId, it)
+                        signaling.sendOffer(roomId, it, isRenegotiation = true, isInitiator = isInitiator)
                     }
                 }
             }
@@ -528,12 +541,10 @@ class WebRtcManager(
             )
         }
         
-        // If we're not the initiator, listen for renegotiation offers
-        if (!isInitiator) {
-            signaling.listenForRenegotiationOffers(roomId) { offer ->
-                Log.d(TAG, "Renegotiation offer received")
-                handleRenegotiationOffer(roomId, offer)
-            }
+        // Both parties listen for renegotiation offers to support two-way screen sharing
+        signaling.listenForRenegotiationOffers(roomId, isInitiator) { offer ->
+            Log.d(TAG, "Renegotiation offer received")
+            handleRenegotiationOffer(roomId, offer)
         }
     }
     

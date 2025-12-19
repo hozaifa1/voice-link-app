@@ -27,12 +27,17 @@ class ScreenCaptureManager(
     companion object {
         private const val TAG = "ScreenCaptureManager"
         
-        // Video resolution and frame rate settings
-        // Lower resolution for better performance and bandwidth
-        private const val VIDEO_WIDTH = 1280
-        private const val VIDEO_HEIGHT = 720
-        private const val VIDEO_FPS = 30
+        // SD quality settings (default - saves bandwidth)
+        private const val SD_MAX_DIMENSION = 720
+        private const val SD_FPS = 24
+        
+        // HD quality settings (premium - higher bandwidth)
+        private const val HD_MAX_DIMENSION = 1080
+        private const val HD_FPS = 30
     }
+    
+    // HD mode flag
+    private var isHdMode = false
 
     sealed class State {
         data object Idle : State()
@@ -66,6 +71,14 @@ class ScreenCaptureManager(
      * Check if we have stored permission to start capture.
      */
     fun hasPermission(): Boolean = mediaProjectionPermissionData != null
+    
+    /**
+     * Set HD mode for screen capture.
+     */
+    fun setHdMode(enabled: Boolean) {
+        isHdMode = enabled
+        Log.d(TAG, "HD mode set to: $enabled")
+    }
 
     /**
      * Create and initialize the screen capturer.
@@ -127,9 +140,10 @@ class ScreenCaptureManager(
     /**
      * Start capturing the screen.
      * Must call initialize() first.
+     * Preserves screen orientation (portrait/landscape) for proper display on receiver.
      */
     fun startCapture(): Boolean {
-        Log.d(TAG, "Starting screen capture")
+        Log.d(TAG, "Starting screen capture (HD mode: $isHdMode)")
         
         val capturer = screenCapturer
         if (capturer == null) {
@@ -141,17 +155,23 @@ class ScreenCaptureManager(
         try {
             // Get display metrics for resolution
             val displayMetrics = getDisplayMetrics()
+            val screenWidth = displayMetrics.widthPixels
+            val screenHeight = displayMetrics.heightPixels
             
-            // Calculate scaled dimensions maintaining aspect ratio
-            val (width, height) = calculateScaledDimensions(
-                displayMetrics.widthPixels,
-                displayMetrics.heightPixels,
-                VIDEO_WIDTH,
-                VIDEO_HEIGHT
+            // Determine quality settings based on HD mode
+            val maxDimension = if (isHdMode) HD_MAX_DIMENSION else SD_MAX_DIMENSION
+            val fps = if (isHdMode) HD_FPS else SD_FPS
+            
+            // Calculate scaled dimensions preserving orientation
+            // This ensures portrait stays portrait, landscape stays landscape
+            val (width, height) = calculateScaledDimensionsPreservingOrientation(
+                screenWidth,
+                screenHeight,
+                maxDimension
             )
 
-            Log.d(TAG, "Starting capture at ${width}x${height} @ ${VIDEO_FPS}fps")
-            capturer.startCapture(width, height, VIDEO_FPS)
+            Log.d(TAG, "Starting capture at ${width}x${height} @ ${fps}fps (screen: ${screenWidth}x${screenHeight})")
+            capturer.startCapture(width, height, fps)
             
             _state.value = State.Capturing
             _isCapturing.value = true
@@ -224,23 +244,30 @@ class ScreenCaptureManager(
     }
 
     /**
-     * Calculate scaled dimensions maintaining aspect ratio.
-     * Ensures the output fits within maxWidth x maxHeight.
+     * Calculate scaled dimensions preserving the original orientation.
+     * For portrait screens: height > width
+     * For landscape screens: width > height
+     * The longest dimension is scaled to maxDimension.
      */
-    private fun calculateScaledDimensions(
+    private fun calculateScaledDimensionsPreservingOrientation(
         originalWidth: Int,
         originalHeight: Int,
-        maxWidth: Int,
-        maxHeight: Int
+        maxDimension: Int
     ): Pair<Int, Int> {
         val aspectRatio = originalWidth.toFloat() / originalHeight.toFloat()
+        val isPortrait = originalHeight > originalWidth
         
-        var width = maxWidth
-        var height = (width / aspectRatio).toInt()
+        var width: Int
+        var height: Int
         
-        if (height > maxHeight) {
-            height = maxHeight
+        if (isPortrait) {
+            // Portrait: scale height to max, calculate width
+            height = maxDimension
             width = (height * aspectRatio).toInt()
+        } else {
+            // Landscape: scale width to max, calculate height
+            width = maxDimension
+            height = (width / aspectRatio).toInt()
         }
         
         // Ensure dimensions are even (required by some encoders)

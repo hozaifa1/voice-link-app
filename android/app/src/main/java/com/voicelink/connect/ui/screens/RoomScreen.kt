@@ -88,6 +88,7 @@ fun RoomScreen(
     val systemAudioActive by webRtcManager.systemAudioActive.collectAsState()
     val screenShareActive by webRtcManager.screenShareActive.collectAsState()
     val remoteVideoTrack by webRtcManager.remoteVideoTrack.collectAsState()
+    val isHdMode by webRtcManager.isHdMode.collectAsState()
     
     // MediaProjection launcher for system audio sharing
     val audioProjectionLauncher = rememberLauncherForActivityResult(
@@ -248,8 +249,10 @@ fun RoomScreen(
                         webRtcManager = webRtcManager,
                         isFullscreen = isFullscreen,
                         isVideoMuted = isVideoMuted,
+                        isHdMode = isHdMode,
                         onToggleFullscreen = { isFullscreen = !isFullscreen },
                         onToggleVideoMute = { isVideoMuted = !isVideoMuted },
+                        onToggleHdMode = { webRtcManager.setHdMode(!isHdMode) },
                         onToggleShareScreen = {
                             if (screenShareActive) {
                                 // Stop both screen and audio sharing
@@ -584,8 +587,10 @@ private fun ColumnScope.ConnectedScreen(
     webRtcManager: WebRtcManager,
     isFullscreen: Boolean,
     isVideoMuted: Boolean,
+    isHdMode: Boolean,
     onToggleFullscreen: () -> Unit,
     onToggleVideoMute: () -> Unit,
+    onToggleHdMode: () -> Unit,
     onToggleShareScreen: () -> Unit,
     onToggleShareAudio: () -> Unit,
     onDisconnect: () -> Unit
@@ -769,7 +774,7 @@ private fun ColumnScope.ConnectedScreen(
     
     Spacer(modifier = Modifier.height(24.dp))
     
-    // Simplified control buttons - only 2 buttons
+    // Control buttons - Share Screen, Share Audio, HD toggle
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly
@@ -777,7 +782,7 @@ private fun ColumnScope.ConnectedScreen(
         // Share Screen button (shares screen + audio)
         ShareButton(
             icon = if (screenShareActive) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
-            label = if (screenShareActive) "Stop Sharing" else "Share Screen",
+            label = if (screenShareActive) "Stop" else "Share Screen",
             isActive = screenShareActive,
             onClick = onToggleShareScreen
         )
@@ -788,6 +793,15 @@ private fun ColumnScope.ConnectedScreen(
             label = if (systemAudioActive) "Stop Audio" else "Share Audio",
             isActive = systemAudioActive,
             onClick = onToggleShareAudio
+        )
+        
+        // HD toggle button (premium feature)
+        ShareButton(
+            icon = Icons.Default.Hd,
+            label = if (isHdMode) "HD On" else "HD Off",
+            isActive = isHdMode,
+            isPremium = true,
+            onClick = onToggleHdMode
         )
     }
     
@@ -801,9 +815,10 @@ private fun ColumnScope.ConnectedScreen(
     ) {
         Text(
             text = when {
-                screenShareActive -> "Sharing your screen and audio."
+                screenShareActive && isHdMode -> "Sharing screen in HD (1080p). Higher bandwidth usage."
+                screenShareActive -> "Sharing screen in SD (720p)."
                 systemAudioActive -> "Sharing audio only."
-                else -> "Tap 'Share Screen' to share screen + audio, or 'Share Audio' for audio only."
+                else -> "Tap 'Share Screen' to share screen + audio."
             },
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier
@@ -834,21 +849,28 @@ private fun ShareButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     isActive: Boolean,
+    isPremium: Boolean = false,
     onClick: () -> Unit
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Button(
             onClick = onClick,
             modifier = Modifier
-                .height(64.dp)
-                .widthIn(min = 140.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = if (isActive) {
-                ButtonDefaults.buttonColors(
+                .height(56.dp)
+                .widthIn(min = 100.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = when {
+                isPremium && isActive -> ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFFD700) // Gold for premium active
+                )
+                isPremium -> ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = Color(0xFFFFD700) // Gold text for premium
+                )
+                isActive -> ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
-            } else {
-                ButtonDefaults.buttonColors(
+                else -> ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -857,12 +879,12 @@ private fun ShareButton(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelLarge
+                style = MaterialTheme.typography.labelMedium
             )
         }
     }

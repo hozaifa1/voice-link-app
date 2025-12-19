@@ -42,6 +42,8 @@ class FirebaseSignaling {
     // Track offer/answer versions to detect renegotiation
     private var lastOfferVersion: Long = 0
     private var lastAnswerVersion: Long = 0
+    private var lastCallerRenegotiationVersion: Long = 0
+    private var lastCalleeRenegotiationVersion: Long = 0
 
     suspend fun signInAnonymously(): Boolean {
         return try {
@@ -87,8 +89,13 @@ class FirebaseSignaling {
         return doc.exists()
     }
 
-    suspend fun sendOffer(roomId: String, offer: SessionDescription) {
-        Log.d(TAG, "Sending offer to room: $roomId")
+    suspend fun sendOffer(roomId: String, offer: SessionDescription, isRenegotiation: Boolean = false, isInitiator: Boolean = true) {
+        val fieldName = when {
+            !isRenegotiation -> "offer"
+            isInitiator -> "callerRenegotiationOffer"
+            else -> "calleeRenegotiationOffer"
+        }
+        Log.d(TAG, "Sending offer to room: $roomId (field: $fieldName)")
         
         val offerData = hashMapOf(
             "type" to offer.type.canonicalForm(),
@@ -99,7 +106,7 @@ class FirebaseSignaling {
         try {
             firestore.collection(COLLECTION_ROOMS)
                 .document(roomId.uppercase())
-                .update("offer", offerData)
+                .update(fieldName, offerData)
                 .await()
             Log.d(TAG, "Offer sent successfully")
         } catch (e: Exception) {
@@ -189,10 +196,13 @@ class FirebaseSignaling {
     }
     
     /**
-     * Listen for renegotiation offers (for non-initiator after initial connection).
+     * Listen for renegotiation offers from the remote peer.
+     * @param isInitiator true if this device is the initiator (will listen for callee offers)
      */
-    fun listenForRenegotiationOffers(roomId: String, callback: (SessionDescription) -> Unit) {
-        Log.d(TAG, "Listening for renegotiation offers in room: $roomId")
+    fun listenForRenegotiationOffers(roomId: String, isInitiator: Boolean, callback: (SessionDescription) -> Unit) {
+        // Initiator listens for callee renegotiation offers, and vice versa
+        val fieldName = if (isInitiator) "calleeRenegotiationOffer" else "callerRenegotiationOffer"
+        Log.d(TAG, "Listening for renegotiation offers in room: $roomId (field: $fieldName)")
         
         renegotiationOfferListener?.remove()
         renegotiationOfferListener = firestore.collection(COLLECTION_ROOMS)
@@ -203,19 +213,24 @@ class FirebaseSignaling {
                     return@addSnapshotListener
                 }
                 
-                val offerData = snapshot?.get("offer") as? Map<*, *>
+                val offerData = snapshot?.get(fieldName) as? Map<*, *>
                 if (offerData != null) {
                     val type = offerData["type"] as? String
                     val sdp = offerData["sdp"] as? String
                     val version = (offerData["version"] as? Long) ?: 0
                     
-                    if (type != null && sdp != null && version > lastOfferVersion) {
-                        lastOfferVersion = version
+                    val lastVersion = if (isInitiator) lastCalleeRenegotiationVersion else lastCallerRenegotiationVersion
+                    if (type != null && sdp != null && version > lastVersion) {
+                        if (isInitiator) {
+                            lastCalleeRenegotiationVersion = version
+                        } else {
+                            lastCallerRenegotiationVersion = version
+                        }
                         val offer = SessionDescription(
                             SessionDescription.Type.fromCanonicalForm(type),
                             sdp
                         )
-                        Log.d(TAG, "Renegotiation offer received (version: $version)")
+                        Log.d(TAG, "Renegotiation offer received from $fieldName (version: $version)")
                         callback(offer)
                     }
                 }
@@ -301,6 +316,8 @@ class FirebaseSignaling {
         renegotiationAnswerListener = null
         lastOfferVersion = 0
         lastAnswerVersion = 0
+        lastCallerRenegotiationVersion = 0
+        lastCalleeRenegotiationVersion = 0
     }
 
     private fun generateRoomCode(): String {
