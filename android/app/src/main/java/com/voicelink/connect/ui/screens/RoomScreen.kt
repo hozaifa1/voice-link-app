@@ -2,13 +2,19 @@ package com.voicelink.connect.ui.screens
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.media.projection.MediaProjectionManager
+import android.util.Log
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -17,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -103,6 +110,9 @@ fun RoomScreen(
         }
     }
     
+    // Coroutine scope for async operations
+    val coroutineScope = rememberCoroutineScope()
+    
     // MediaProjection launcher for screen sharing (video + audio)
     val screenShareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -110,11 +120,23 @@ fun RoomScreen(
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             // Start foreground service for media projection
             AudioCaptureService.prepareCapture(context)
-            // Store permission and enable screen share
-            webRtcManager.storeScreenSharePermission(result.resultCode, result.data!!)
-            webRtcManager.enableScreenShare()
-            // Also enable system audio when sharing screen
-            webRtcManager.enableSystemAudio(result.resultCode, result.data!!)
+            
+            // Use coroutine to wait for service to be ready before starting screen share
+            coroutineScope.launch {
+                // Wait for foreground service to be ready (required for MediaProjection on Android 10+)
+                var attempts = 0
+                while (!AudioCaptureService.isRunning && attempts < 50) {
+                    delay(20)
+                    attempts++
+                }
+                
+                if (AudioCaptureService.isRunning) {
+                    // Use the combined method that handles everything in one go
+                    webRtcManager.enableScreenShareWithAudio(result.resultCode, result.data!!)
+                } else {
+                    Log.e("RoomScreen", "Foreground service not ready for screen share")
+                }
+            }
         }
     }
     
@@ -598,13 +620,48 @@ private fun ColumnScope.ConnectedScreen(
     onToggleShareAudio: () -> Unit,
     onDisconnect: () -> Unit
 ) {
-    // Fullscreen video dialog
+    // Get context for orientation control
+    val context = LocalContext.current
+    
+    // Fullscreen video dialog with tap-to-hide controls and auto-rotation
     if (isFullscreen && remoteVideoTrack != null) {
+        // State to track if controls are visible (hide after tap for immersive experience)
+        var controlsVisible by remember { mutableStateOf(true) }
+        
+        // Get the activity for orientation control
+        val activity = context as? Activity
+        val isLandscapeVideo = remoteVideoAspectRatio > 1f
+        
+        // Lock orientation based on video content (like YouTube)
+        DisposableEffect(isLandscapeVideo) {
+            val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            
+            // Set orientation based on video aspect ratio
+            activity?.requestedOrientation = if (isLandscapeVideo) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            }
+            
+            onDispose {
+                // Restore original orientation when exiting fullscreen
+                activity?.requestedOrientation = originalOrientation
+            }
+        }
+        
+        // Auto-hide controls after 3 seconds
+        LaunchedEffect(controlsVisible) {
+            if (controlsVisible) {
+                delay(3000)
+                controlsVisible = false
+            }
+        }
+        
         Dialog(
             onDismissRequest = onToggleFullscreen,
             properties = DialogProperties(
                 dismissOnBackPress = true,
-                dismissOnClickOutside = true,
+                dismissOnClickOutside = false, // Don't dismiss on click, toggle controls instead
                 usePlatformDefaultWidth = false
             )
         ) {
@@ -612,6 +669,13 @@ private fun ColumnScope.ConnectedScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    ) {
+                        // Toggle controls visibility on tap
+                        controlsVisible = !controlsVisible
+                    }
             ) {
                 RemoteVideoView(
                     videoTrack = remoteVideoTrack,
@@ -619,43 +683,50 @@ private fun ColumnScope.ConnectedScreen(
                     modifier = Modifier.fillMaxSize()
                 )
                 
-                // Video controls overlay
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
+                // Video controls overlay - only show when controlsVisible is true
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = controlsVisible,
+                    enter = androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.fadeOut(),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    // Top bar - exit fullscreen
-                    IconButton(
-                        onClick = onToggleFullscreen,
-                        modifier = Modifier.align(Alignment.TopEnd)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FullscreenExit,
-                            contentDescription = "Exit Fullscreen",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                    
-                    // Bottom controls
-                    Row(
+                    Box(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .background(
-                                color = Color.Black.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(24.dp)
-                            )
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .fillMaxSize()
+                            .padding(16.dp)
                     ) {
-                        IconButton(onClick = onToggleVideoMute) {
+                        // Top bar - exit fullscreen
+                        IconButton(
+                            onClick = onToggleFullscreen,
+                            modifier = Modifier.align(Alignment.TopEnd)
+                        ) {
                             Icon(
-                                imageVector = if (isVideoMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                                contentDescription = if (isVideoMuted) "Unmute" else "Mute",
-                                tint = Color.White
+                                imageVector = Icons.Default.FullscreenExit,
+                                contentDescription = "Exit Fullscreen",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
                             )
+                        }
+                        
+                        // Bottom controls
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .background(
+                                    color = Color.Black.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(24.dp)
+                                )
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = onToggleVideoMute) {
+                                Icon(
+                                    imageVector = if (isVideoMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                    contentDescription = if (isVideoMuted) "Unmute" else "Mute",
+                                    tint = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -663,29 +734,38 @@ private fun ColumnScope.ConnectedScreen(
         }
     }
     
-    // Remote Video Display (if receiving video)
-    // Dynamically adapt to portrait or landscape based on incoming video stream
-    if (remoteVideoTrack != null) {
-        val isPortraitVideo = remoteVideoAspectRatio < 1f
-        Card(
-            modifier = Modifier
-                .then(
-                    if (isPortraitVideo) {
-                        // Portrait video: limit height and use aspect ratio
-                        Modifier
-                            .fillMaxWidth(0.6f)
-                            .aspectRatio(remoteVideoAspectRatio)
-                    } else {
-                        // Landscape video: fill width and use aspect ratio
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(remoteVideoAspectRatio)
-                    }
-                )
-                .clickable { onToggleFullscreen() },
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Box {
+    // Use a scrollable column for content to ensure disconnect button stays accessible
+    val scrollState = rememberScrollState()
+    
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .verticalScroll(scrollState),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Remote Video Display (if receiving video)
+        // Dynamically adapt to portrait or landscape based on incoming video stream
+        if (remoteVideoTrack != null) {
+            val isPortraitVideo = remoteVideoAspectRatio < 1f
+            Card(
+                modifier = Modifier
+                    .then(
+                        if (isPortraitVideo) {
+                            // Portrait video: limit width and constrain height
+                            Modifier
+                                .fillMaxWidth(0.6f)
+                                .heightIn(max = 400.dp) // Limit max height for portrait
+                        } else {
+                            // Landscape video: fill width and use aspect ratio
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(remoteVideoAspectRatio.coerceIn(0.5f, 2.5f))
+                        }
+                    )
+                    .clickable { onToggleFullscreen() },
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Box {
                 RemoteVideoView(
                     videoTrack = remoteVideoTrack,
                     eglBase = webRtcManager.getEglBaseContext(),
@@ -852,9 +932,11 @@ private fun ColumnScope.ConnectedScreen(
         )
     }
     
-    Spacer(modifier = Modifier.weight(1f))
+    } // End of scrollable column
     
-    // Disconnect button
+    Spacer(modifier = Modifier.height(12.dp))
+    
+    // Disconnect button - always visible at bottom
     Button(
         onClick = onDisconnect,
         modifier = Modifier.fillMaxWidth(),

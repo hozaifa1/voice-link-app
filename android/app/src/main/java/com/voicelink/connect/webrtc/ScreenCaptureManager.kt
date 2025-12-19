@@ -56,6 +56,9 @@ class ScreenCaptureManager(
     private var videoSource: VideoSource? = null
     private var mediaProjectionPermissionData: Intent? = null
     private var mediaProjectionPermissionResultCode: Int = 0
+    
+    // Shared MediaProjection (when sharing with audio capture)
+    private var sharedMediaProjection: MediaProjection? = null
 
     /**
      * Store the MediaProjection permission result for later use.
@@ -70,7 +73,21 @@ class ScreenCaptureManager(
     /**
      * Check if we have stored permission to start capture.
      */
-    fun hasPermission(): Boolean = mediaProjectionPermissionData != null
+    fun hasPermission(): Boolean = mediaProjectionPermissionData != null || sharedMediaProjection != null
+    
+    /**
+     * Set a shared MediaProjection for use with screen capture.
+     * Use this when the MediaProjection is shared with audio capture.
+     */
+    fun setSharedMediaProjection(projection: MediaProjection) {
+        sharedMediaProjection = projection
+        Log.d(TAG, "Shared MediaProjection set")
+    }
+    
+    /**
+     * Get the shared MediaProjection for audio capture to use.
+     */
+    fun getSharedMediaProjection(): MediaProjection? = sharedMediaProjection
     
     /**
      * Set HD mode for screen capture.
@@ -82,7 +99,7 @@ class ScreenCaptureManager(
 
     /**
      * Create and initialize the screen capturer.
-     * Must be called after storePermissionResult().
+     * Must be called after storePermissionResult() or setSharedMediaProjection().
      * 
      * @param videoSource The WebRTC VideoSource to attach the capturer to
      * @return true if initialization was successful
@@ -91,7 +108,7 @@ class ScreenCaptureManager(
         Log.d(TAG, "Initializing ScreenCaptureManager")
         
         val permissionData = mediaProjectionPermissionData
-        if (permissionData == null) {
+        if (permissionData == null && sharedMediaProjection == null) {
             Log.e(TAG, "No MediaProjection permission stored")
             _state.value = State.Error("MediaProjection permission required")
             return false
@@ -108,9 +125,17 @@ class ScreenCaptureManager(
                 }
             }
 
-            // Create the screen capturer
+            // Create the screen capturer - use stored permission data
+            // The ScreenCapturerAndroid will create its own MediaProjection internally
+            val captureData = permissionData ?: run {
+                // If we have a shared projection but no permission data, we need to handle this
+                Log.e(TAG, "Cannot create ScreenCapturerAndroid without permission data")
+                _state.value = State.Error("Permission data required for screen capture")
+                return false
+            }
+            
             screenCapturer = ScreenCapturerAndroid(
-                permissionData,
+                captureData,
                 mediaProjectionCallback
             )
 

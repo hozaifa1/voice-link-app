@@ -95,18 +95,38 @@ class SystemAudioMixer(private val context: Context) {
      */
     @SuppressLint("MissingPermission")
     fun initialize(resultCode: Int, data: Intent): Boolean {
-        Log.d(TAG, "Initializing SystemAudioMixer")
+        Log.d(TAG, "Initializing SystemAudioMixer with intent")
         
         try {
             val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) 
                 as MediaProjectionManager
-            mediaProjection = projectionManager.getMediaProjection(resultCode, data)
+            val projection = projectionManager.getMediaProjection(resultCode, data)
             
-            if (mediaProjection == null) {
+            if (projection == null) {
                 Log.e(TAG, "Failed to get MediaProjection")
                 _state.value = State.Error("Failed to get MediaProjection")
                 return false
             }
+            
+            return initializeWithProjection(projection)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing SystemAudioMixer", e)
+            release()
+            _state.value = State.Error(e.message ?: "Unknown error")
+            return false
+        }
+    }
+    
+    /**
+     * Initialize the system audio capture with an existing MediaProjection.
+     * Use this when sharing a MediaProjection with screen capture.
+     */
+    @SuppressLint("MissingPermission")
+    fun initializeWithProjection(projection: MediaProjection): Boolean {
+        Log.d(TAG, "Initializing SystemAudioMixer with shared projection")
+        
+        try {
+            mediaProjection = projection
             
             // Create AudioPlaybackCaptureConfiguration
             val playbackConfig = AudioPlaybackCaptureConfiguration.Builder(mediaProjection!!)
@@ -159,7 +179,7 @@ class SystemAudioMixer(private val context: Context) {
             return true
             
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing SystemAudioMixer", e)
+            Log.e(TAG, "Error initializing SystemAudioMixer with projection", e)
             release()
             _state.value = State.Error(e.message ?: "Unknown error")
             return false

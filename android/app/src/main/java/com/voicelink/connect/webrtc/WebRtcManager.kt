@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.voicelink.connect.audio.SystemAudioMixer
+import com.voicelink.connect.audio.VoiceNoiseSuppressor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,6 +31,15 @@ class WebRtcManager(
 ) {
     companion object {
         private const val TAG = "WebRtcManager"
+        
+        // Bitrate constants for video quality
+        // SD quality: 720p @ 1.5 Mbps
+        private const val SD_MAX_BITRATE_BPS = 1_500_000
+        private const val SD_MIN_BITRATE_BPS = 500_000
+        
+        // HD quality: 1080p @ 4 Mbps
+        private const val HD_MAX_BITRATE_BPS = 4_000_000
+        private const val HD_MIN_BITRATE_BPS = 1_500_000
     }
 
     sealed class ConnectionState {
@@ -73,6 +83,9 @@ class WebRtcManager(
     
     // System audio mixer for capturing and mixing system audio into WebRTC
     private var systemAudioMixer: SystemAudioMixer? = null
+    
+    // Voice noise suppressor for microphone audio
+    private val voiceNoiseSuppressor = VoiceNoiseSuppressor()
     
     // Audio device module with callback for mixing
     private var audioDeviceModule: JavaAudioDeviceModule? = null
@@ -127,14 +140,20 @@ class WebRtcManager(
                     sampleRate: Int,
                     audioBuffer: ByteBuffer
                 ) {
-                    // Process system audio - uses priority-based switching:
-                    // - When system audio is playing: transmit system audio only
-                    // - When system audio is silent: transmit mic audio only
-                    systemAudioMixer?.let { mixer ->
-                        if (mixer.isActive.value) {
-                            val bytesInBuffer = audioBuffer.remaining()
-                            mixer.processAudioBuffer(audioBuffer, bytesInBuffer, channelCount, sampleRate)
-                        }
+                    val bytesInBuffer = audioBuffer.remaining()
+                    
+                    // Check if system audio is active
+                    val systemAudioActive = systemAudioMixer?.isActive?.value == true
+                    
+                    if (systemAudioActive) {
+                        // Process system audio - uses priority-based switching:
+                        // - When system audio is playing: transmit system audio only
+                        // - When system audio is silent: transmit mic audio only
+                        systemAudioMixer?.processAudioBuffer(audioBuffer, bytesInBuffer, channelCount, sampleRate)
+                    } else {
+                        // Apply voice noise suppression to microphone audio
+                        // This provides WhatsApp-like noise cancellation for voice
+                        voiceNoiseSuppressor.processAudio(audioBuffer, bytesInBuffer, channelCount, sampleRate)
                     }
                 }
             })
@@ -181,6 +200,35 @@ class WebRtcManager(
             return false
         }
     }
+    
+    /**
+     * Enable system audio capture with a shared MediaProjection.
+     * Use this when sharing a MediaProjection with screen capture.
+     */
+    fun enableSystemAudioWithProjection(projection: android.media.projection.MediaProjection): Boolean {
+        Log.d(TAG, "Enabling system audio with shared projection")
+        
+        try {
+            if (systemAudioMixer == null) {
+                systemAudioMixer = SystemAudioMixer(context)
+            }
+            
+            val success = systemAudioMixer?.initializeWithProjection(projection) == true
+            if (success) {
+                _systemAudioActive.value = true
+                Log.i(TAG, "System audio capture enabled with shared projection")
+                return true
+            } else {
+                Log.e(TAG, "Failed to initialize SystemAudioMixer with projection")
+                _systemAudioActive.value = false
+                return false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enabling system audio with projection", e)
+            _systemAudioActive.value = false
+            return false
+        }
+    }
 
     /**
      * Disable system audio capture.
@@ -205,13 +253,142 @@ class WebRtcManager(
     
     /**
      * Set HD mode for screen sharing.
+     * This updates both the capture resolution and the encoding bitrate.
      */
     fun setHdMode(enabled: Boolean) {
         _isHdMode.value = enabled
         screenCaptureManager?.setHdMode(enabled)
+        
+        // Update bitrate on the video sender if screen share is active
+        if (_screenShareActive.value) {
+            updateVideoBitrate(enabled)
+        }
+        
         Log.d(TAG, "HD mode set to: $enabled")
     }
+    
+    /**
+     * Update the video encoding bitrate based on HD mode.
+     * This is crucial for actual HD quality - resolution alone is not enough.
+     */
+    private fun updateVideoBitrate(isHd: Boolean) {
+        val pc = peerConnection ?: return
+        
+        // Find the video sender
+        val videoSender = pc.senders.find { sender ->
+            sender.track()?.kind() == "video"
+        } ?: run {
+            Log.w(TAG, "No video sender found to update bitrate")
+            return
+        }
+        
+        try {
+            val parameters = videoSender.parameters
+            if (parameters.encodings.isEmpty()) {
+                Log.w(TAG, "No encodings found in RTP parameters")
+                return
+            }
+            
+            // Update bitrate for all encodings
+            val maxBitrate = if (isHd) HD_MAX_BITRATE_BPS else SD_MAX_BITRATE_BPS
+            val minBitrate = if (isHd) HD_MIN_BITRATE_BPS else SD_MIN_BITRATE_BPS
+            
+            for (encoding in parameters.encodings) {
+                encoding.maxBitrateBps = maxBitrate
+                encoding.minBitrateBps = minBitrate
+                // For screen sharing, prioritize resolution over frame rate
+                encoding.scaleResolutionDownBy = if (isHd) 1.0 else 1.5
+            }
+            
+            val success = videoSender.setParameters(parameters)
+            Log.d(TAG, "Video bitrate updated: maxBitrate=${maxBitrate/1_000_000.0}Mbps, success=$success")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating video bitrate", e)
+        }
+    }
 
+    /**
+     * Enable screen sharing with system audio.
+     * This method handles the MediaProjection properly to share it between
+     * screen capture and audio capture.
+     * 
+     * @param resultCode The result code from MediaProjection permission
+     * @param data The intent data from MediaProjection permission
+     * @return true if screen sharing started successfully
+     */
+    fun enableScreenShareWithAudio(resultCode: Int, data: Intent): Boolean {
+        Log.d(TAG, "Enabling screen share with audio")
+        
+        val factory = peerConnectionFactory ?: run {
+            Log.e(TAG, "PeerConnectionFactory not initialized")
+            return false
+        }
+        
+        val pc = peerConnection ?: run {
+            Log.e(TAG, "PeerConnection not initialized")
+            return false
+        }
+        
+        try {
+            // Create screen capture manager if needed
+            if (screenCaptureManager == null) {
+                screenCaptureManager = ScreenCaptureManager(context, eglBase)
+            }
+            
+            val captureManager = screenCaptureManager!!
+            
+            // Store the permission for screen capture
+            captureManager.storePermissionResult(resultCode, data)
+            
+            // Apply HD mode setting
+            captureManager.setHdMode(_isHdMode.value)
+            
+            // Create video source
+            localVideoSource = factory.createVideoSource(true) // isScreencast = true
+            
+            // Initialize the screen capturer with the video source
+            if (!captureManager.initialize(localVideoSource!!)) {
+                Log.e(TAG, "Failed to initialize screen capturer")
+                localVideoSource?.dispose()
+                localVideoSource = null
+                return false
+            }
+            
+            // Create video track
+            localVideoTrack = factory.createVideoTrack("video0", localVideoSource)
+            
+            // Add video track to peer connection
+            localVideoTrack?.let { track ->
+                pc.addTrack(track, listOf("stream0"))
+                Log.d(TAG, "Local video track added")
+            }
+            
+            // Start capturing
+            if (!captureManager.startCapture()) {
+                Log.e(TAG, "Failed to start screen capture")
+                disableScreenShare()
+                return false
+            }
+            
+            _screenShareActive.value = true
+            
+            // Apply bitrate settings based on current HD mode
+            updateVideoBitrate(_isHdMode.value)
+            
+            // Trigger renegotiation to add video to the session
+            triggerRenegotiation()
+            
+            Log.i(TAG, "Screen share with audio enabled successfully")
+            return true
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enabling screen share with audio", e)
+            disableScreenShare()
+            return false
+        }
+    }
+    
     /**
      * Enable screen sharing.
      * Must call storeScreenSharePermission() first.
@@ -242,6 +419,9 @@ class WebRtcManager(
                 return false
             }
             
+            // Apply HD mode setting
+            captureManager.setHdMode(_isHdMode.value)
+            
             // Create video source
             localVideoSource = factory.createVideoSource(true) // isScreencast = true
             
@@ -270,6 +450,9 @@ class WebRtcManager(
             }
             
             _screenShareActive.value = true
+            
+            // Apply bitrate settings based on current HD mode
+            updateVideoBitrate(_isHdMode.value)
             
             // Trigger renegotiation to add video to the session
             triggerRenegotiation()
