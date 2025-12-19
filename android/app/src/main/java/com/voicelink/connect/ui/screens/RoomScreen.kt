@@ -177,6 +177,138 @@ fun RoomScreen(
             else -> {}
         }
     }
+    
+    // Get activity for orientation control
+    val activity = context as? Activity
+    
+    // FULLSCREEN MODE - Render outside of Scaffold for true fullscreen
+    // This must be at the top level to cover the entire screen including status bar
+    if (isFullscreen && remoteVideoTrack != null && screenState == RoomScreenState.Connected) {
+        var controlsVisible by remember { mutableStateOf(true) }
+        val isLandscapeVideo = remoteVideoAspectRatio > 1f
+        
+        // Lock orientation based on video content
+        DisposableEffect(isLandscapeVideo) {
+            val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            
+            activity?.requestedOrientation = if (isLandscapeVideo) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            }
+            
+            onDispose {
+                activity?.requestedOrientation = originalOrientation
+            }
+        }
+        
+        // Hide system UI for true immersive fullscreen
+        DisposableEffect(Unit) {
+            val window = activity?.window
+            val decorView = window?.decorView
+            val originalSystemUiVisibility = decorView?.systemUiVisibility ?: 0
+            
+            // Set immersive fullscreen flags
+            decorView?.systemUiVisibility = (
+                android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            )
+            
+            onDispose {
+                decorView?.systemUiVisibility = originalSystemUiVisibility
+            }
+        }
+        
+        // Handle back press to exit fullscreen
+        BackHandler(enabled = true) {
+            isFullscreen = false
+        }
+        
+        // Auto-hide controls after 3 seconds
+        LaunchedEffect(controlsVisible) {
+            if (controlsVisible) {
+                delay(3000)
+                controlsVisible = false
+            }
+        }
+        
+        // True fullscreen Box - covers entire screen
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                ) {
+                    controlsVisible = !controlsVisible
+                }
+        ) {
+            // Fullscreen video
+            RemoteVideoView(
+                videoTrack = remoteVideoTrack,
+                eglBase = webRtcManager.getEglBaseContext(),
+                modifier = Modifier.fillMaxSize(),
+                aspectRatio = remoteVideoAspectRatio,
+                scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
+            )
+            
+            // Controls overlay
+            androidx.compose.animation.AnimatedVisibility(
+                visible = controlsVisible,
+                enter = androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.fadeOut(),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Exit fullscreen button
+                    IconButton(
+                        onClick = { isFullscreen = false },
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FullscreenExit,
+                            contentDescription = "Exit Fullscreen",
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    
+                    // Bottom controls
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                color = Color.Black.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(24.dp)
+                            )
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { isVideoMuted = !isVideoMuted }) {
+                            Icon(
+                                imageVector = if (isVideoMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                contentDescription = if (isVideoMuted) "Unmute" else "Mute",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Return early - don't render Scaffold when in fullscreen
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -658,124 +790,8 @@ private fun ColumnScope.ConnectedScreen(
     onToggleShareAudio: () -> Unit,
     onDisconnect: () -> Unit
 ) {
-    // Get context for orientation control
-    val context = LocalContext.current
-    
-    // Fullscreen video - uses full-screen Box instead of Dialog for proper orientation rotation
-    // Dialog creates a separate window that doesn't rotate, Box is part of the activity window
-    if (isFullscreen && remoteVideoTrack != null) {
-        // State to track if controls are visible (hide after tap for immersive experience)
-        var controlsVisible by remember { mutableStateOf(true) }
-        
-        // Get the activity for orientation control
-        val activity = context as? Activity
-        val isLandscapeVideo = remoteVideoAspectRatio > 1f
-        
-        // Lock orientation based on video content (like YouTube)
-        DisposableEffect(isLandscapeVideo) {
-            val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            
-            // Set orientation based on video aspect ratio
-            activity?.requestedOrientation = if (isLandscapeVideo) {
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            } else {
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-            }
-            
-            onDispose {
-                // Restore original orientation when exiting fullscreen
-                activity?.requestedOrientation = originalOrientation
-            }
-        }
-        
-        // Handle back press to exit fullscreen
-        BackHandler(enabled = true) {
-            onToggleFullscreen()
-        }
-        
-        // Auto-hide controls after 3 seconds
-        LaunchedEffect(controlsVisible) {
-            if (controlsVisible) {
-                delay(3000)
-                controlsVisible = false
-            }
-        }
-        
-        // Full-screen Box overlay (not Dialog) - this rotates with the activity
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                ) {
-                    // Toggle controls visibility on tap
-                    controlsVisible = !controlsVisible
-                }
-        ) {
-            // Fullscreen video - use SCALE_ASPECT_FIT to properly display video
-            // Pass aspect ratio to force view recreation on orientation change
-            RemoteVideoView(
-                videoTrack = remoteVideoTrack,
-                eglBase = webRtcManager.getEglBaseContext(),
-                modifier = Modifier.fillMaxSize(),
-                aspectRatio = remoteVideoAspectRatio,
-                scalingType = RendererCommon.ScalingType.SCALE_ASPECT_FIT
-            )
-            
-            // Video controls overlay - only show when controlsVisible is true
-            androidx.compose.animation.AnimatedVisibility(
-                visible = controlsVisible,
-                enter = androidx.compose.animation.fadeIn(),
-                exit = androidx.compose.animation.fadeOut(),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-                    // Top bar - exit fullscreen
-                    IconButton(
-                        onClick = onToggleFullscreen,
-                        modifier = Modifier.align(Alignment.TopEnd)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FullscreenExit,
-                            contentDescription = "Exit Fullscreen",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                    
-                    // Bottom controls
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .background(
-                                color = Color.Black.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(24.dp)
-                            )
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = onToggleVideoMute) {
-                            Icon(
-                                imageVector = if (isVideoMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                                contentDescription = if (isVideoMuted) "Unmute" else "Mute",
-                                tint = Color.White
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Return early - don't show regular content when fullscreen
-        return
-    }
+    // Fullscreen is now handled at the RoomScreen level, outside of Scaffold
+    // This ensures true fullscreen without app bar or other UI elements
     
     // Use a scrollable column for content to ensure disconnect button stays accessible
     val scrollState = rememberScrollState()
