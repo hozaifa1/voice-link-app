@@ -95,6 +95,14 @@ class WebRtcManager(
     
     private var remoteAudioTrack: AudioTrack? = null
     
+    // Silent App mode - mutes all incoming audio
+    private val _isSilentMode = MutableStateFlow(false)
+    val isSilentMode: StateFlow<Boolean> = _isSilentMode.asStateFlow()
+    
+    // Mute Me mode - mutes microphone output
+    private val _isMicMuted = MutableStateFlow(false)
+    val isMicMuted: StateFlow<Boolean> = _isMicMuted.asStateFlow()
+    
     // Remote video aspect ratio (width/height) - used to adapt video view size
     private val _remoteVideoAspectRatio = MutableStateFlow(16f / 9f)
     val remoteVideoAspectRatio: StateFlow<Float> = _remoteVideoAspectRatio.asStateFlow()
@@ -124,6 +132,9 @@ class WebRtcManager(
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isInitiator = false
     private var currentRoomId: String? = null
+    
+    // Job for monitoring system audio playing state
+    private var systemAudioMonitorJob: Job? = null
     
     // ICE restart and connection monitoring
     private var iceRestartCount = 0
@@ -213,9 +224,9 @@ class WebRtcManager(
             val success = systemAudioMixer?.initialize(resultCode, data) == true
             if (success) {
                 _systemAudioActive.value = true
-                // Mute remote audio so sender doesn't hear remote peer while sharing system audio
-                muteRemoteAudio(true)
-                Log.i(TAG, "System audio capture enabled successfully, remote audio muted")
+                // Start monitoring system audio playing state for seamless switching
+                startSystemAudioMonitoring()
+                Log.i(TAG, "System audio capture enabled successfully, monitoring audio playing state")
                 return true
             } else {
                 Log.e(TAG, "Failed to initialize SystemAudioMixer")
@@ -244,9 +255,9 @@ class WebRtcManager(
             val success = systemAudioMixer?.initializeWithProjection(projection) == true
             if (success) {
                 _systemAudioActive.value = true
-                // Mute remote audio so sender doesn't hear remote peer while sharing system audio
-                muteRemoteAudio(true)
-                Log.i(TAG, "System audio capture enabled with shared projection, remote audio muted")
+                // Start monitoring system audio playing state for seamless switching
+                startSystemAudioMonitoring()
+                Log.i(TAG, "System audio capture enabled with shared projection, monitoring audio playing state")
                 return true
             } else {
                 Log.e(TAG, "Failed to initialize SystemAudioMixer with projection")
@@ -265,6 +276,10 @@ class WebRtcManager(
      */
     fun disableSystemAudio() {
         Log.d(TAG, "Disabling system audio")
+        // Stop monitoring
+        systemAudioMonitorJob?.cancel()
+        systemAudioMonitorJob = null
+        
         systemAudioMixer?.release()
         systemAudioMixer = null
         _systemAudioActive.value = false
@@ -273,12 +288,51 @@ class WebRtcManager(
     }
     
     /**
+     * Monitor system audio playing state for seamless audio switching.
+     * When system audio is playing, mute remote audio.
+     * When system audio is paused/silent, unmute remote audio so sender hears receiver.
+     */
+    private fun startSystemAudioMonitoring() {
+        systemAudioMonitorJob?.cancel()
+        systemAudioMonitorJob = scope.launch {
+            systemAudioMixer?.isSystemAudioPlaying?.collect { isPlaying ->
+                // Dynamically mute/unmute remote audio based on whether system audio is actually playing
+                muteRemoteAudio(isPlaying)
+                Log.d(TAG, "System audio playing state changed: $isPlaying, remote audio ${if (isPlaying) "muted" else "unmuted"}")
+            }
+        }
+    }
+    
+    /**
      * Mute or unmute the remote audio track.
      * Used to prevent audio leak when sender is playing system audio.
+     * Also respects Silent App mode.
      */
     private fun muteRemoteAudio(mute: Boolean) {
-        remoteAudioTrack?.setEnabled(!mute)
-        Log.d(TAG, "Remote audio ${if (mute) "muted" else "unmuted"}")
+        // If Silent App mode is enabled, always keep remote audio muted
+        val shouldMute = mute || _isSilentMode.value
+        remoteAudioTrack?.setEnabled(!shouldMute)
+        Log.d(TAG, "Remote audio ${if (shouldMute) "muted" else "unmuted"}")
+    }
+    
+    /**
+     * Toggle Silent App mode - mutes all incoming audio from remote peer.
+     */
+    fun toggleSilentMode() {
+        _isSilentMode.value = !_isSilentMode.value
+        // Update remote audio state immediately
+        val isSystemPlaying = systemAudioMixer?.isSystemAudioPlaying?.value == true
+        muteRemoteAudio(isSystemPlaying)
+        Log.d(TAG, "Silent App mode: ${_isSilentMode.value}")
+    }
+    
+    /**
+     * Toggle Mute Me mode - mutes microphone so no voice input is transmitted.
+     */
+    fun toggleMicMute() {
+        _isMicMuted.value = !_isMicMuted.value
+        localAudioTrack?.setEnabled(!_isMicMuted.value)
+        Log.d(TAG, "Mic muted: ${_isMicMuted.value}")
     }
 
     /**
@@ -838,9 +892,10 @@ class WebRtcManager(
                         remoteAudioTrack = audioTrack
                         _remoteAudioActive.value = true
                         
-                        // If system audio is already active, mute remote audio immediately
-                        if (_systemAudioActive.value) {
-                            muteRemoteAudio(true)
+                        // Check if system audio is actively playing or Silent App mode is on
+                        val isSystemPlaying = systemAudioMixer?.isSystemAudioPlaying?.value == true
+                        if (isSystemPlaying || _isSilentMode.value) {
+                            muteRemoteAudio(isSystemPlaying)
                         }
                     }
                     "video" -> {
@@ -1212,6 +1267,8 @@ class WebRtcManager(
         Log.d(TAG, "Disconnecting")
         
         stopConnectionMonitoring()
+        systemAudioMonitorJob?.cancel()
+        systemAudioMonitorJob = null
         disableScreenShare()
         disableSystemAudio()
         
@@ -1244,6 +1301,8 @@ class WebRtcManager(
         _remoteAudioActive.value = false
         _systemAudioActive.value = false
         _screenShareActive.value = false
+        _isSilentMode.value = false
+        _isMicMuted.value = false
         _participants.value = emptyList()
         _participantEvent.value = null
         previousParticipants = emptyList()

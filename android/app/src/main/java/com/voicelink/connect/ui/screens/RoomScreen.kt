@@ -104,6 +104,8 @@ fun RoomScreen(
     val remoteScreenShareActive by webRtcManager.remoteScreenShareActive.collectAsState()
     val participantEvent by webRtcManager.participantEvent.collectAsState()
     val participants by webRtcManager.participants.collectAsState()
+    val isSilentMode by webRtcManager.isSilentMode.collectAsState()
+    val isMicMuted by webRtcManager.isMicMuted.collectAsState()
     
     // State for showing screen share warning dialog
     var showScreenShareWarning by remember { mutableStateOf(false) }
@@ -534,7 +536,6 @@ fun RoomScreen(
                 RoomScreenState.Connected -> {
                     ConnectedScreen(
                         roomCode = roomCode.ifEmpty { joinCode },
-                        systemAudioActive = systemAudioActive,
                         screenShareActive = screenShareActive,
                         remoteVideoTrack = remoteVideoTrack,
                         remoteVideoAspectRatio = remoteVideoAspectRatio,
@@ -542,6 +543,8 @@ fun RoomScreen(
                         isFullscreen = isFullscreen,
                         isVideoMuted = isVideoMuted,
                         isHdMode = isHdMode,
+                        isSilentMode = isSilentMode,
+                        isMicMuted = isMicMuted,
                         participantCount = participants.size,
                         onToggleFullscreen = { isFullscreen = !isFullscreen },
                         onToggleVideoMute = { isVideoMuted = !isVideoMuted },
@@ -563,18 +566,8 @@ fun RoomScreen(
                                 }
                             }
                         },
-                        onToggleShareAudio = {
-                            if (systemAudioActive) {
-                                webRtcManager.disableSystemAudio()
-                                if (!screenShareActive) {
-                                    AudioCaptureService.stopCapture(context)
-                                }
-                            } else {
-                                // Request MediaProjection permission for audio only
-                                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                                audioProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
-                            }
-                        },
+                        onToggleSilentMode = { webRtcManager.toggleSilentMode() },
+                        onToggleMicMute = { webRtcManager.toggleMicMute() },
                         onDisconnect = {
                             AudioCaptureService.stopCapture(context)
                             WebRtcService.stop(context)
@@ -971,7 +964,6 @@ private fun ColumnScope.WaitingScreen(
 @Composable
 private fun ColumnScope.ConnectedScreen(
     roomCode: String,
-    systemAudioActive: Boolean,
     screenShareActive: Boolean,
     remoteVideoTrack: VideoTrack?,
     remoteVideoAspectRatio: Float,
@@ -979,12 +971,15 @@ private fun ColumnScope.ConnectedScreen(
     isFullscreen: Boolean,
     isVideoMuted: Boolean,
     isHdMode: Boolean,
+    isSilentMode: Boolean,
+    isMicMuted: Boolean,
     participantCount: Int,
     onToggleFullscreen: () -> Unit,
     onToggleVideoMute: () -> Unit,
     onToggleHdMode: () -> Unit,
     onToggleShareScreen: () -> Unit,
-    onToggleShareAudio: () -> Unit,
+    onToggleSilentMode: () -> Unit,
+    onToggleMicMute: () -> Unit,
     onDisconnect: () -> Unit
 ) {
     // Fullscreen is now handled at the RoomScreen level, outside of Scaffold
@@ -1146,14 +1141,14 @@ private fun ColumnScope.ConnectedScreen(
     
     Spacer(modifier = Modifier.height(24.dp))
     
-    // Control buttons - Share Screen, Share Audio, HD toggle
+    // Control buttons - Share Screen, HD toggle, Silent App, Mute Me
     // Improved layout with proper spacing to prevent overlap
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // First row: Share Screen and Share Audio
+        // First row: Share Screen and HD toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
@@ -1166,23 +1161,37 @@ private fun ColumnScope.ConnectedScreen(
                 onClick = onToggleShareScreen
             )
             
-            // Share Audio button (shares audio only)
+            // HD toggle
             ShareButton(
-                icon = if (systemAudioActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                label = if (systemAudioActive) "Stop Audio" else "Share Audio",
-                isActive = systemAudioActive,
-                onClick = onToggleShareAudio
+                icon = Icons.Default.Hd,
+                label = if (isHdMode) "HD On" else "HD Off",
+                isActive = isHdMode,
+                isPremium = true,
+                onClick = onToggleHdMode
             )
         }
         
-        // Second row: HD toggle
-        ShareButton(
-            icon = Icons.Default.Hd,
-            label = if (isHdMode) "HD On" else "HD Off",
-            isActive = isHdMode,
-            isPremium = true,
-            onClick = onToggleHdMode
-        )
+        // Second row: Silent App and Mute Me
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+        ) {
+            // Silent App button - mutes all incoming audio
+            ShareButton(
+                icon = if (isSilentMode) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                label = if (isSilentMode) "Silent On" else "Silent App",
+                isActive = isSilentMode,
+                onClick = onToggleSilentMode
+            )
+            
+            // Mute Me button - mutes microphone
+            ShareButton(
+                icon = if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                label = if (isMicMuted) "Muted" else "Mute Me",
+                isActive = isMicMuted,
+                onClick = onToggleMicMute
+            )
+        }
     }
     
     // Info text
@@ -1197,7 +1206,9 @@ private fun ColumnScope.ConnectedScreen(
             text = when {
                 screenShareActive && isHdMode -> "Sharing screen in HD (1080p). Higher bandwidth usage."
                 screenShareActive -> "Sharing screen in SD (720p)."
-                systemAudioActive -> "Sharing audio only."
+                isSilentMode && isMicMuted -> "Silent mode & mic muted. No audio in/out."
+                isSilentMode -> "Silent mode. You won't hear incoming audio."
+                isMicMuted -> "Mic muted. Your voice won't be transmitted."
                 else -> "Tap 'Share Screen' to share screen + audio."
             },
             style = MaterialTheme.typography.bodySmall,
