@@ -2,6 +2,7 @@ package com.voicelink.connect.webrtc
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.util.Log
 import com.voicelink.connect.audio.SystemAudioMixer
 import com.voicelink.connect.audio.VoiceNoiseSuppressor
@@ -103,12 +104,19 @@ class WebRtcManager(
     private val _isMicMuted = MutableStateFlow(false)
     val isMicMuted: StateFlow<Boolean> = _isMicMuted.asStateFlow()
     
+    // Loudspeaker mode - routes audio to loudspeaker instead of earpiece
+    private val _isLoudspeakerOn = MutableStateFlow(false)
+    val isLoudspeakerOn: StateFlow<Boolean> = _isLoudspeakerOn.asStateFlow()
+    
     // Remote video aspect ratio (width/height) - used to adapt video view size
     private val _remoteVideoAspectRatio = MutableStateFlow(16f / 9f)
     val remoteVideoAspectRatio: StateFlow<Float> = _remoteVideoAspectRatio.asStateFlow()
     
     // VideoSink to track remote video dimensions
     private var dimensionTrackingSink: VideoSink? = null
+    
+    // AudioManager for controlling loudspeaker
+    private var audioManager: AudioManager? = null
 
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
@@ -151,6 +159,9 @@ class WebRtcManager(
 
     fun initialize() {
         Log.d(TAG, "Initializing WebRTC")
+        
+        // Initialize AudioManager for loudspeaker control
+        audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         
         val options = PeerConnectionFactory.InitializationOptions.builder(context)
             .setEnableInternalTracer(true)
@@ -333,6 +344,17 @@ class WebRtcManager(
         _isMicMuted.value = !_isMicMuted.value
         localAudioTrack?.setEnabled(!_isMicMuted.value)
         Log.d(TAG, "Mic muted: ${_isMicMuted.value}")
+    }
+    
+    /**
+     * Toggle loudspeaker mode - routes audio to loudspeaker or earpiece.
+     * When ON: Audio plays through the large phone loudspeaker.
+     * When OFF: Audio plays through the default output (earpiece during calls).
+     */
+    fun toggleLoudspeaker() {
+        _isLoudspeakerOn.value = !_isLoudspeakerOn.value
+        audioManager?.isSpeakerphoneOn = _isLoudspeakerOn.value
+        Log.d(TAG, "Loudspeaker: ${_isLoudspeakerOn.value}")
     }
 
     /**

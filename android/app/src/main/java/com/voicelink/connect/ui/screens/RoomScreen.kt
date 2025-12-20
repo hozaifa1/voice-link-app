@@ -106,6 +106,7 @@ fun RoomScreen(
     val participants by webRtcManager.participants.collectAsState()
     val isSilentMode by webRtcManager.isSilentMode.collectAsState()
     val isMicMuted by webRtcManager.isMicMuted.collectAsState()
+    val isLoudspeakerOn by webRtcManager.isLoudspeakerOn.collectAsState()
     
     // State for showing screen share warning dialog
     var showScreenShareWarning by remember { mutableStateOf(false) }
@@ -545,6 +546,7 @@ fun RoomScreen(
                         isHdMode = isHdMode,
                         isSilentMode = isSilentMode,
                         isMicMuted = isMicMuted,
+                        isLoudspeakerOn = isLoudspeakerOn,
                         participantCount = participants.size,
                         onToggleFullscreen = { isFullscreen = !isFullscreen },
                         onToggleVideoMute = { isVideoMuted = !isVideoMuted },
@@ -568,6 +570,7 @@ fun RoomScreen(
                         },
                         onToggleSilentMode = { webRtcManager.toggleSilentMode() },
                         onToggleMicMute = { webRtcManager.toggleMicMute() },
+                        onToggleLoudspeaker = { webRtcManager.toggleLoudspeaker() },
                         onDisconnect = {
                             AudioCaptureService.stopCapture(context)
                             WebRtcService.stop(context)
@@ -973,6 +976,7 @@ private fun ColumnScope.ConnectedScreen(
     isHdMode: Boolean,
     isSilentMode: Boolean,
     isMicMuted: Boolean,
+    isLoudspeakerOn: Boolean,
     participantCount: Int,
     onToggleFullscreen: () -> Unit,
     onToggleVideoMute: () -> Unit,
@@ -980,6 +984,7 @@ private fun ColumnScope.ConnectedScreen(
     onToggleShareScreen: () -> Unit,
     onToggleSilentMode: () -> Unit,
     onToggleMicMute: () -> Unit,
+    onToggleLoudspeaker: () -> Unit,
     onDisconnect: () -> Unit
 ) {
     // Fullscreen is now handled at the RoomScreen level, outside of Scaffold
@@ -1190,6 +1195,20 @@ private fun ColumnScope.ConnectedScreen(
                 label = if (isMicMuted) "Muted" else "Mute Me",
                 isActive = isMicMuted,
                 onClick = onToggleMicMute
+            )
+        }
+        
+        // Third row: Loudspeaker
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+        ) {
+            // Loudspeaker button - routes audio to loudspeaker
+            ShareButton(
+                icon = if (isLoudspeakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk,
+                label = if (isLoudspeakerOn) "Speaker ON" else "Loudspeaker",
+                isActive = isLoudspeakerOn,
+                onClick = onToggleLoudspeaker
             )
         }
     }
