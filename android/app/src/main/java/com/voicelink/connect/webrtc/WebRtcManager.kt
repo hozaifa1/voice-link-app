@@ -299,13 +299,11 @@ class WebRtcManager(
      */
     fun setHdMode(enabled: Boolean) {
         _isHdMode.value = enabled
-        screenCaptureManager?.setHdMode(enabled)
         
-        // Update bitrate on the video sender if screen share is active
+        // Only update encoding parameters if screen share is active
+        // DO NOT restart capture - it causes black screen
         if (_screenShareActive.value) {
             updateVideoBitrate(enabled)
-            // Restart capture with new resolution and framerate
-            restartCaptureWithNewSettings()
         }
         
         // Signal HD mode to remote peer via Firebase
@@ -315,7 +313,7 @@ class WebRtcManager(
             }
         }
         
-        Log.d(TAG, "HD mode set to: $enabled")
+        Log.d(TAG, "HD mode set to: $enabled (bitrate updated dynamically)")
     }
     
     /**
@@ -329,10 +327,8 @@ class WebRtcManager(
         if (_screenShareActive.value && requestedBy != myId) {
             Log.d(TAG, "Remote HD mode request: enabled=$enabled")
             _isHdMode.value = enabled
-            screenCaptureManager?.setHdMode(enabled)
+            // Only update encoding parameters dynamically - no capture restart
             updateVideoBitrate(enabled)
-            // Restart capture to apply new resolution and framerate
-            restartCaptureWithNewSettings()
         } else if (!_screenShareActive.value && requestedBy != myId) {
             // We're the viewer, just update our local state
             _isHdMode.value = enabled
@@ -340,30 +336,14 @@ class WebRtcManager(
     }
     
     /**
-     * Restart screen capture with updated HD mode settings.
-     * This applies the new resolution and framerate for HD/SD quality.
+     * Note: Restarting capture when HD mode changes causes black screen.
+     * Instead, we update encoding parameters (bitrate, framerate) dynamically
+     * without stopping/restarting the capture. Capture always runs at 1080p/30fps,
+     * and encoding parameters control the actual quality sent over the network.
      */
     private fun restartCaptureWithNewSettings() {
-        val captureManager = screenCaptureManager ?: return
-        
-        Log.d(TAG, "Restarting capture with HD mode: ${_isHdMode.value}")
-        
-        try {
-            // Stop current capture
-            captureManager.stopCapture()
-            
-            // Small delay to ensure clean stop
-            Thread.sleep(100)
-            
-            // Start capture with new settings (HD mode already set)
-            if (!captureManager.startCapture()) {
-                Log.e(TAG, "Failed to restart capture with new settings")
-            } else {
-                Log.d(TAG, "Capture restarted successfully with new quality settings")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error restarting capture", e)
-        }
+        // Intentionally empty - do not restart capture to avoid black screen
+        Log.d(TAG, "HD mode change handled via dynamic encoding parameters only")
     }
     
     /**
@@ -403,7 +383,7 @@ class WebRtcManager(
             
             // Set degradation preference to maintain resolution quality
             // This tells WebRTC to reduce framerate before reducing resolution
-            parameters.degradationPreference = DegradationPreference.MAINTAIN_RESOLUTION
+            parameters.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
             
             val success = videoSender.setParameters(parameters)
             Log.d(TAG, "Video bitrate updated: maxBitrate=${maxBitrate/1_000_000.0}Mbps, success=$success")
