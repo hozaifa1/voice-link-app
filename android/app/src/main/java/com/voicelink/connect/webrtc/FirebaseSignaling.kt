@@ -107,14 +107,19 @@ class FirebaseSignaling {
         Log.d(TAG, "Joining room as participant: $roomId")
         
         try {
+            // Use set with merge to ensure clean state for rejoining
+            // This will create or update the participant entry
             firestore.collection(COLLECTION_ROOMS)
                 .document(roomId.uppercase())
                 .update(
-                    "participants.$userId", hashMapOf(
-                        "joinedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                        "status" to "joined"
-                    ),
-                    "participantsVersion" to System.currentTimeMillis()
+                    mapOf(
+                        "participants.$userId" to hashMapOf(
+                            "joinedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                            "status" to "joined",
+                            "leftAt" to com.google.firebase.firestore.FieldValue.delete() // Remove leftAt if rejoining
+                        ),
+                        "participantsVersion" to System.currentTimeMillis()
+                    )
                 )
                 .await()
             Log.d(TAG, "Joined room as participant successfully")
@@ -356,7 +361,16 @@ class FirebaseSignaling {
         offerListener = null
     }
 
-    fun cleanup() {
+    suspend fun cleanup(roomId: String? = null) {
+        // Mark user as left in the room if roomId is provided
+        roomId?.let {
+            try {
+                leaveRoomAsParticipant(it)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to mark participant as left during cleanup", e)
+            }
+        }
+        
         candidateListener?.remove()
         answerListener?.remove()
         offerListener?.remove()

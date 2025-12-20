@@ -1215,10 +1215,15 @@ class WebRtcManager(
         disableScreenShare()
         disableSystemAudio()
         
-        currentRoomId?.let { roomId ->
+        val roomId = currentRoomId
+        if (roomId != null) {
             scope.launch {
-                signaling.leaveRoomAsParticipant(roomId)
-                signaling.leaveRoom(roomId)
+                try {
+                    signaling.leaveRoomAsParticipant(roomId)
+                    signaling.leaveRoom(roomId)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error during room cleanup", e)
+                }
             }
         }
         
@@ -1234,6 +1239,7 @@ class WebRtcManager(
         
         currentRoomId = null
         iceRestartCount = 0
+        isInitiator = false
         _connectionState.value = ConnectionState.Idle
         _remoteAudioActive.value = false
         _systemAudioActive.value = false
@@ -1257,8 +1263,19 @@ class WebRtcManager(
     }
 
     fun release() {
+        val roomId = currentRoomId
+        
         stopConnectionMonitoring()
         disconnect()
+        
+        // Final cleanup of signaling
+        scope.launch {
+            try {
+                signaling.cleanup(roomId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during signaling cleanup", e)
+            }
+        }
         
         audioDeviceModule?.release()
         audioDeviceModule = null

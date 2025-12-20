@@ -7,6 +7,7 @@ import android.media.projection.MediaProjectionManager
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -110,6 +111,12 @@ fun RoomScreen(
     // State for back button confirmation dialog
     var showBackConfirmDialog by remember { mutableStateOf(false) }
     
+    // State for app exit confirmation dialog
+    var showExitConfirmDialog by remember { mutableStateOf(false) }
+    
+    // Joining timeout job
+    var joiningTimeoutJob by remember { mutableStateOf<Job?>(null) }
+    
     // Participant notification state
     var participantNotification by remember { mutableStateOf<ParticipantNotification?>(null) }
     
@@ -166,7 +173,7 @@ fun RoomScreen(
             // Stop WebRTC service when leaving
             WebRtcService.stop(context)
             webRtcManager.release()
-            signaling.cleanup()
+            // Cleanup is now handled in release() with proper participant status update
         }
     }
     
@@ -370,9 +377,25 @@ fun RoomScreen(
         return
     }
 
-    // Handle back button press with confirmation when connected
-    BackHandler(enabled = screenState == RoomScreenState.Connected) {
-        showBackConfirmDialog = true
+    // Handle back button press based on state
+    BackHandler(enabled = true) {
+        when (screenState) {
+            RoomScreenState.Connected -> {
+                showBackConfirmDialog = true
+            }
+            RoomScreenState.Joining, RoomScreenState.Creating -> {
+                // Cancel joining/creating and return to initial screen
+                joiningTimeoutJob?.cancel()
+                WebRtcService.stop(context)
+                webRtcManager.disconnect()
+                screenState = RoomScreenState.Initial
+                errorMessage = "Join cancelled"
+            }
+            RoomScreenState.Initial, RoomScreenState.WaitingForPeer, RoomScreenState.Disconnected -> {
+                // Show exit confirmation
+                showExitConfirmDialog = true
+            }
+        }
     }
     
     Scaffold(
@@ -381,11 +404,21 @@ fun RoomScreen(
                 title = { Text("WebRTC Room") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        if (screenState == RoomScreenState.Connected) {
-                            showBackConfirmDialog = true
-                        } else {
-                            webRtcManager.disconnect()
-                            onBackClick()
+                        when (screenState) {
+                            RoomScreenState.Connected -> {
+                                showBackConfirmDialog = true
+                            }
+                            RoomScreenState.Joining, RoomScreenState.Creating -> {
+                                // Cancel joining/creating and return to initial screen
+                                joiningTimeoutJob?.cancel()
+                                WebRtcService.stop(context)
+                                webRtcManager.disconnect()
+                                screenState = RoomScreenState.Initial
+                                errorMessage = "Join cancelled"
+                            }
+                            RoomScreenState.Initial, RoomScreenState.WaitingForPeer, RoomScreenState.Disconnected -> {
+                                showExitConfirmDialog = true
+                            }
                         }
                     }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -415,7 +448,21 @@ fun RoomScreen(
                             // Start foreground service to keep connection alive
                             WebRtcService.start(context)
                             screenState = RoomScreenState.Creating
+                            
+                            // Set timeout for creating (15 seconds)
+                            joiningTimeoutJob?.cancel()
+                            joiningTimeoutJob = coroutineScope.launch {
+                                delay(15000) // 15 seconds timeout
+                                if (screenState == RoomScreenState.Creating) {
+                                    WebRtcService.stop(context)
+                                    webRtcManager.disconnect()
+                                    errorMessage = "Failed to create room. Please try again."
+                                    screenState = RoomScreenState.Initial
+                                }
+                            }
+                            
                             webRtcManager.createRoom { createdRoomCode ->
+                                joiningTimeoutJob?.cancel()
                                 roomCode = createdRoomCode
                                 screenState = RoomScreenState.WaitingForPeer
                             }
@@ -429,7 +476,21 @@ fun RoomScreen(
                                 // Start foreground service to keep connection alive
                                 WebRtcService.start(context)
                                 screenState = RoomScreenState.Joining
+                                
+                                // Set timeout for joining (30 seconds)
+                                joiningTimeoutJob?.cancel()
+                                joiningTimeoutJob = coroutineScope.launch {
+                                    delay(30000) // 30 seconds timeout
+                                    if (screenState == RoomScreenState.Joining) {
+                                        WebRtcService.stop(context)
+                                        webRtcManager.disconnect()
+                                        errorMessage = "Join timed out. The room might be full or unavailable."
+                                        screenState = RoomScreenState.Initial
+                                    }
+                                }
+                                
                                 webRtcManager.joinRoom(joinCode) { success ->
+                                    joiningTimeoutJob?.cancel()
                                     if (!success) {
                                         WebRtcService.stop(context)
                                         errorMessage = "Failed to join room. Check the code and try again."
@@ -578,7 +639,9 @@ fun RoomScreen(
                                 AudioCaptureService.stopCapture(context)
                                 WebRtcService.stop(context)
                                 webRtcManager.disconnect()
-                                onBackClick()
+                                screenState = RoomScreenState.Initial
+                                roomCode = ""
+                                joinCode = ""
                             }
                         ) {
                             Text("Leave")
@@ -587,6 +650,30 @@ fun RoomScreen(
                     dismissButton = {
                         TextButton(onClick = { showBackConfirmDialog = false }) {
                             Text("Stay")
+                        }
+                    }
+                )
+            }
+            
+            // App exit confirmation dialog
+            if (showExitConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showExitConfirmDialog = false },
+                    title = { Text("Exit App?") },
+                    text = { Text("Are you sure you want to exit VoiceLink Connect?") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showExitConfirmDialog = false
+                                onBackClick()
+                            }
+                        ) {
+                            Text("Exit")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showExitConfirmDialog = false }) {
+                            Text("Cancel")
                         }
                     }
                 )
