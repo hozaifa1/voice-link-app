@@ -220,6 +220,24 @@ fun RoomScreen(
                     delay(3000)
                     participantNotification = null
                 }
+                is WebRtcManager.ParticipantEvent.StartedSharing -> {
+                    participantNotification = ParticipantNotification(
+                        message = "Participant started sharing screen",
+                        type = NotificationType.SCREEN_SHARE_START,
+                        timestamp = event.timestamp
+                    )
+                    delay(3000)
+                    participantNotification = null
+                }
+                is WebRtcManager.ParticipantEvent.StoppedSharing -> {
+                    participantNotification = ParticipantNotification(
+                        message = "Participant stopped sharing screen",
+                        type = NotificationType.SCREEN_SHARE_STOP,
+                        timestamp = event.timestamp
+                    )
+                    delay(3000)
+                    participantNotification = null
+                }
             }
             webRtcManager.clearParticipantEvent()
         }
@@ -737,81 +755,103 @@ private fun InitialScreen(
         Spacer(modifier = Modifier.height(16.dp))
     }
     
-    Spacer(modifier = Modifier.height(32.dp))
-    
-    Icon(
-        imageVector = Icons.Default.Wifi,
-        contentDescription = null,
-        modifier = Modifier.size(80.dp),
-        tint = MaterialTheme.colorScheme.primary
-    )
-    
     Spacer(modifier = Modifier.height(24.dp))
     
+    Box(
+        modifier = Modifier
+            .size(72.dp)
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+                    )
+                ),
+                shape = CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Wifi,
+            contentDescription = null,
+            modifier = Modifier.size(36.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+    }
+    
+    Spacer(modifier = Modifier.height(20.dp))
+    
     Text(
-        text = "P2P Audio Connection",
+        text = "VoiceLink Connect",
         style = MaterialTheme.typography.headlineMedium,
         fontWeight = FontWeight.Bold
     )
     
+    Spacer(modifier = Modifier.height(4.dp))
+    
     Text(
-        text = "Create a room or join with a code",
+        text = "Secure P2P Communication",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     
-    Spacer(modifier = Modifier.height(48.dp))
+    Spacer(modifier = Modifier.height(40.dp))
     
     // Create Room Button
     Button(
         onClick = onCreateRoom,
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
+            .height(48.dp),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Icon(Icons.Default.Add, contentDescription = null)
+        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
         Spacer(modifier = Modifier.width(8.dp))
-        Text("Create Room", fontSize = 16.sp)
+        Text("Create Room", fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
     
-    Spacer(modifier = Modifier.height(32.dp))
+    Spacer(modifier = Modifier.height(24.dp))
     
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        HorizontalDivider(modifier = Modifier.weight(1f))
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
         Text(
             text = "  OR  ",
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium
         )
-        HorizontalDivider(modifier = Modifier.weight(1f))
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
     }
     
-    Spacer(modifier = Modifier.height(32.dp))
+    Spacer(modifier = Modifier.height(24.dp))
     
     // Join Room Section
     Text(
         text = "Join with Room Code",
-        style = MaterialTheme.typography.titleMedium
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold
     )
     
-    Spacer(modifier = Modifier.height(16.dp))
+    Spacer(modifier = Modifier.height(12.dp))
     
     OutlinedTextField(
         value = joinCode,
         onValueChange = onJoinCodeChange,
-        label = { Text("Room Code") },
+        label = { Text("Room Code", style = MaterialTheme.typography.labelMedium) },
         placeholder = { Text("ABC123") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
         textStyle = LocalTextStyle.current.copy(
             fontFamily = FontFamily.Monospace,
-            fontSize = 24.sp,
+            fontSize = 20.sp,
             textAlign = TextAlign.Center,
-            letterSpacing = 4.sp
+            letterSpacing = 3.sp,
+            fontWeight = FontWeight.Medium
         ),
+        shape = RoundedCornerShape(12.dp),
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Characters,
             imeAction = ImeAction.Done
@@ -821,47 +861,50 @@ private fun InitialScreen(
         )
     )
     
-    Spacer(modifier = Modifier.height(16.dp))
+    Spacer(modifier = Modifier.height(12.dp))
     
     Button(
         onClick = onJoinRoom,
         enabled = joinCode.length == 6,
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
+            .height(48.dp),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Icon(Icons.Default.Login, contentDescription = null)
+        Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(20.dp))
         Spacer(modifier = Modifier.width(8.dp))
-        Text("Join Room", fontSize = 16.sp)
+        Text("Join Room", fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
     
     // Error Message
     errorMessage?.let { error ->
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.errorContainer
             ),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
         ) {
             Row(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     Icons.Default.Error,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = error,
                     color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall
                 )
-                IconButton(onClick = onDismissError) {
-                    Icon(Icons.Default.Close, contentDescription = "Dismiss")
+                IconButton(onClick = onDismissError, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss", modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -875,9 +918,16 @@ private fun LoadingScreen(message: String) {
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(modifier = Modifier.size(64.dp))
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(text = message, style = MaterialTheme.typography.titleMedium)
+            CircularProgressIndicator(
+                modifier = Modifier.size(48.dp),
+                strokeWidth = 3.dp
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
@@ -888,16 +938,31 @@ private fun ColumnScope.WaitingScreen(
     onCopyCode: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Spacer(modifier = Modifier.height(48.dp))
+    Spacer(modifier = Modifier.height(32.dp))
     
-    Icon(
-        imageVector = Icons.Default.HourglassTop,
-        contentDescription = null,
-        modifier = Modifier.size(64.dp),
-        tint = MaterialTheme.colorScheme.primary
-    )
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+                    )
+                ),
+                shape = CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.HourglassTop,
+            contentDescription = null,
+            modifier = Modifier.size(28.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+    }
     
-    Spacer(modifier = Modifier.height(24.dp))
+    Spacer(modifier = Modifier.height(20.dp))
     
     Text(
         text = "Waiting for peer...",
@@ -905,62 +970,74 @@ private fun ColumnScope.WaitingScreen(
         fontWeight = FontWeight.Bold
     )
     
+    Spacer(modifier = Modifier.height(4.dp))
+    
     Text(
         text = "Share this code with your friend",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     
-    Spacer(modifier = Modifier.height(32.dp))
+    Spacer(modifier = Modifier.height(28.dp))
     
     // Room Code Display
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        ),
+        shape = RoundedCornerShape(16.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
+                .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = "Room Code",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontWeight = FontWeight.Medium
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = roomCode,
                 style = MaterialTheme.typography.displaySmall.copy(
                     fontFamily = FontFamily.Monospace,
-                    letterSpacing = 8.sp
+                    letterSpacing = 6.sp
                 ),
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            OutlinedButton(onClick = onCopyCode) {
-                Icon(Icons.Default.ContentCopy, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Copy Code")
+            Spacer(modifier = Modifier.height(14.dp))
+            OutlinedButton(
+                onClick = onCopyCode,
+                modifier = Modifier.height(40.dp),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Copy Code", fontSize = 14.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
     
     Spacer(modifier = Modifier.height(24.dp))
     
-    CircularProgressIndicator()
+    CircularProgressIndicator(
+        modifier = Modifier.size(40.dp),
+        strokeWidth = 3.dp
+    )
     
     Spacer(modifier = Modifier.weight(1f))
     
     OutlinedButton(
         onClick = onCancel,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().height(44.dp),
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Text("Cancel")
+        Text("Cancel", fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1099,160 +1176,168 @@ private fun ColumnScope.ConnectedScreen(
     }
     
     // Connection info row
-    Row(
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.WifiTethering,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Connected",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = "Room: $roomCode",
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(
+                            color = Color(0xFF10B981),
+                            shape = CircleShape
+                        )
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "${participantCount + 1} in room",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Connected",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
                 )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = roomCode,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${participantCount + 1} in room",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
     
-    Spacer(modifier = Modifier.height(24.dp))
+    Spacer(modifier = Modifier.height(16.dp))
     
-    // Control buttons - Share Screen, HD toggle, Silent App, Mute Me
-    // Improved layout with proper spacing to prevent overlap
+    // Control buttons - Compact grid layout
     Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // First row: Share Screen and HD toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Share Screen button (shares screen + audio)
             ShareButton(
                 icon = if (screenShareActive) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
-                label = if (screenShareActive) "Stop Screen" else "Share Screen",
+                label = if (screenShareActive) "Stop" else "Share",
                 isActive = screenShareActive,
-                onClick = onToggleShareScreen
+                onClick = onToggleShareScreen,
+                modifier = Modifier.weight(1f)
             )
-            
-            // HD toggle
             ShareButton(
                 icon = Icons.Default.Hd,
-                label = if (isHdMode) "HD On" else "HD Off",
+                label = if (isHdMode) "HD" else "SD",
                 isActive = isHdMode,
                 isPremium = true,
-                onClick = onToggleHdMode
+                onClick = onToggleHdMode,
+                modifier = Modifier.weight(1f)
             )
         }
         
         // Second row: Silent App and Mute Me
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Silent App button - mutes all incoming audio
             ShareButton(
                 icon = if (isSilentMode) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                label = if (isSilentMode) "Silent On" else "Silent App",
+                label = if (isSilentMode) "Silent" else "Audio",
                 isActive = isSilentMode,
-                onClick = onToggleSilentMode
+                onClick = onToggleSilentMode,
+                modifier = Modifier.weight(1f)
             )
-            
-            // Mute Me button - mutes microphone
             ShareButton(
                 icon = if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                label = if (isMicMuted) "Muted" else "Mute Me",
+                label = if (isMicMuted) "Muted" else "Mic",
                 isActive = isMicMuted,
-                onClick = onToggleMicMute
+                onClick = onToggleMicMute,
+                modifier = Modifier.weight(1f)
             )
         }
         
         // Third row: Loudspeaker
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
-        ) {
-            // Loudspeaker button - routes audio to loudspeaker
-            ShareButton(
-                icon = if (isLoudspeakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk,
-                label = if (isLoudspeakerOn) "Speaker ON" else "Loudspeaker",
-                isActive = isLoudspeakerOn,
-                onClick = onToggleLoudspeaker
-            )
-        }
+        ShareButton(
+            icon = if (isLoudspeakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk,
+            label = if (isLoudspeakerOn) "Speaker" else "Earpiece",
+            isActive = isLoudspeakerOn,
+            onClick = onToggleLoudspeaker,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
     
     // Info text
-    Spacer(modifier = Modifier.height(16.dp))
+    Spacer(modifier = Modifier.height(12.dp))
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        ),
+        shape = RoundedCornerShape(10.dp)
     ) {
         Text(
             text = when {
-                screenShareActive && isHdMode -> "Sharing screen in HD (1080p). Higher bandwidth usage."
-                screenShareActive -> "Sharing screen in SD (720p)."
-                isSilentMode && isMicMuted -> "Silent mode & mic muted. No audio in/out."
-                isSilentMode -> "Silent mode. You won't hear incoming audio."
-                isMicMuted -> "Mic muted. Your voice won't be transmitted."
-                else -> "Tap 'Share Screen' to share screen + audio."
+                screenShareActive && isHdMode -> "📺 HD screen sharing active"
+                screenShareActive -> "📺 Screen sharing active"
+                isSilentMode && isMicMuted -> "🔇 Silent & muted"
+                isSilentMode -> "🔇 Silent mode active"
+                isMicMuted -> "🎤 Microphone muted"
+                else -> "Ready to share"
             },
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            textAlign = TextAlign.Center
+                .padding(10.dp),
+            textAlign = TextAlign.Center,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
     
     } // End of scrollable column
     
-    Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(10.dp))
     
     // Disconnect button - always visible at bottom
     Button(
         onClick = onDisconnect,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().height(44.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.error
-        )
+        ),
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Icon(Icons.Default.CallEnd, contentDescription = null)
+        Icon(Icons.Default.CallEnd, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(modifier = Modifier.width(8.dp))
-        Text("Disconnect")
+        Text("Disconnect", fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1262,43 +1347,42 @@ private fun ShareButton(
     label: String,
     isActive: Boolean,
     isPremium: Boolean = false,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Button(
-            onClick = onClick,
-            modifier = Modifier
-                .height(56.dp)
-                .widthIn(min = 100.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = when {
-                isPremium && isActive -> ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFFFD700) // Gold for premium active
-                )
-                isPremium -> ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = Color(0xFFFFD700) // Gold text for premium
-                )
-                isActive -> ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-                else -> ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                modifier = Modifier.size(20.dp)
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(44.dp),
+        shape = RoundedCornerShape(10.dp),
+        colors = when {
+            isPremium && isActive -> ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFFFD700),
+                contentColor = Color(0xFF1E293B)
             )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium
+            isPremium -> ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = Color(0xFFFBBF24)
+            )
+            isActive -> ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            )
+            else -> ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 
@@ -1395,7 +1479,7 @@ data class ParticipantNotification(
 )
 
 enum class NotificationType {
-    JOIN, LEAVE
+    JOIN, LEAVE, SCREEN_SHARE_START, SCREEN_SHARE_STOP
 }
 
 @Composable
@@ -1406,19 +1490,21 @@ fun ParticipantNotificationBanner(
     Card(
         modifier = modifier
             .padding(horizontal = 16.dp)
-            .widthIn(max = 300.dp),
+            .widthIn(max = 320.dp),
         colors = CardDefaults.cardColors(
             containerColor = when (notification.type) {
-                NotificationType.JOIN -> Color(0xFF4CAF50).copy(alpha = 0.95f)
-                NotificationType.LEAVE -> Color(0xFFFF9800).copy(alpha = 0.95f)
+                NotificationType.JOIN -> Color(0xFF10B981).copy(alpha = 0.96f)
+                NotificationType.LEAVE -> Color(0xFFF59E0B).copy(alpha = 0.96f)
+                NotificationType.SCREEN_SHARE_START -> Color(0xFF3B82F6).copy(alpha = 0.96f)
+                NotificationType.SCREEN_SHARE_STOP -> Color(0xFF6366F1).copy(alpha = 0.96f)
             }
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        shape = RoundedCornerShape(24.dp)
+        shape = RoundedCornerShape(16.dp)
     ) {
         Row(
             modifier = Modifier
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -1426,15 +1512,17 @@ fun ParticipantNotificationBanner(
                 imageVector = when (notification.type) {
                     NotificationType.JOIN -> Icons.Default.PersonAdd
                     NotificationType.LEAVE -> Icons.Default.PersonRemove
+                    NotificationType.SCREEN_SHARE_START -> Icons.Default.ScreenShare
+                    NotificationType.SCREEN_SHARE_STOP -> Icons.Default.StopScreenShare
                 },
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(22.dp)
             )
             Text(
                 text = notification.message,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Medium,
                 color = Color.White
             )
         }

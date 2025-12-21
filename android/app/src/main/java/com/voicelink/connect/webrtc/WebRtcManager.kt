@@ -58,6 +58,8 @@ class WebRtcManager(
     sealed class ParticipantEvent {
         data class Joined(val userId: String, val timestamp: Long = System.currentTimeMillis()) : ParticipantEvent()
         data class Left(val userId: String, val timestamp: Long = System.currentTimeMillis()) : ParticipantEvent()
+        data class StartedSharing(val userId: String, val timestamp: Long = System.currentTimeMillis()) : ParticipantEvent()
+        data class StoppedSharing(val userId: String, val timestamp: Long = System.currentTimeMillis()) : ParticipantEvent()
     }
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -1000,6 +1002,16 @@ class WebRtcManager(
      */
     private fun handleRemoteScreenShareStatus(isSharing: Boolean, sharerId: String) {
         val myId = signaling.getCurrentUserId()
+        
+        // Only process if this is from the remote peer
+        if (sharerId != myId) {
+            // Emit notification event
+            if (isSharing) {
+                _participantEvent.value = ParticipantEvent.StartedSharing(sharerId)
+            } else {
+                _participantEvent.value = ParticipantEvent.StoppedSharing(sharerId)
+            }
+        }
         
         _remoteScreenShareActive.value = isSharing
         _remoteSharerId.value = if (isSharing) sharerId else null

@@ -79,7 +79,8 @@ class FirebaseSignaling {
                     "joinedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                     "status" to "joined"
                 )
-            )
+            ),
+            "participantsVersion" to System.currentTimeMillis()
         )
         
         firestore.collection(COLLECTION_ROOMS)
