@@ -23,6 +23,7 @@ import com.voicelink.connect.audio.AudioCaptureManager
 import com.voicelink.connect.service.AudioCaptureService
 import com.voicelink.connect.ui.theme.VoiceLinkTheme
 import com.voicelink.connect.ui.screens.RoomScreen
+import com.voicelink.connect.ui.screens.WelcomeScreen
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -76,15 +77,22 @@ class MainActivity : ComponentActivity() {
         
         enableEdgeToEdge()
         setContent {
+            var showWelcome by remember { mutableStateOf(true) }
+            
             VoiceLinkTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Main screen - RoomScreen handles all WebRTC functionality
-                    RoomScreen(
-                        onBackClick = { finish() } // Exit app on back
-                    )
+                    if (showWelcome) {
+                        WelcomeScreen(
+                            onContinue = { showWelcome = false }
+                        )
+                    } else {
+                        RoomScreen(
+                            onBackClick = { finish() }
+                        )
+                    }
                 }
             }
         }

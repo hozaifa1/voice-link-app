@@ -759,30 +759,41 @@ private fun InitialScreen(
     
     Box(
         modifier = Modifier
-            .size(72.dp)
+            .size(80.dp)
             .background(
                 brush = androidx.compose.ui.graphics.Brush.radialGradient(
                     colors = listOf(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+                        Color(0xFF8B5CF6),
+                        Color(0xFF6366F1)
                     )
                 ),
                 shape = CircleShape
             ),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = Icons.Default.Wifi,
-            contentDescription = null,
-            modifier = Modifier.size(36.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Videocam,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = Color.White
+            )
+            Icon(
+                imageVector = Icons.Default.VolumeUp,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = Color.White
+            )
+        }
     }
     
     Spacer(modifier = Modifier.height(20.dp))
     
     Text(
-        text = "VoiceLink Connect",
+        text = "StreamSync",
         style = MaterialTheme.typography.headlineMedium,
         fontWeight = FontWeight.Bold
     )
@@ -790,9 +801,10 @@ private fun InitialScreen(
     Spacer(modifier = Modifier.height(4.dp))
     
     Text(
-        text = "Secure P2P Communication",
+        text = "Share Everything, Seamlessly",
         style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Medium
     )
     
     Spacer(modifier = Modifier.height(40.dp))
@@ -1176,58 +1188,72 @@ private fun ColumnScope.ConnectedScreen(
     }
     
     // Connection info row
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        shape = RoundedCornerShape(12.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFF8B5CF6).copy(alpha = 0.15f),
+                        Color(0xFF6366F1).copy(alpha = 0.15f)
+                    )
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
+                        .size(10.dp)
                         .background(
-                            color = Color(0xFF10B981),
+                            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFF10B981),
+                                    Color(0xFF059669)
+                                )
+                            ),
                             shape = CircleShape
                         )
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = "Connected",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF8B5CF6)
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = roomCode,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF6366F1)
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Person,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        modifier = Modifier.size(16.dp),
+                        tint = Color(0xFF6366F1)
                     )
                     Text(
-                        text = "${participantCount + 1} in room",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "${participantCount + 1} users",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF6366F1),
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
@@ -1255,7 +1281,7 @@ private fun ColumnScope.ConnectedScreen(
             )
             ShareButton(
                 icon = Icons.Default.Hd,
-                label = if (isHdMode) "HD" else "SD",
+                label = "HD",
                 isActive = isHdMode,
                 isPremium = true,
                 onClick = onToggleHdMode,
@@ -1270,14 +1296,14 @@ private fun ColumnScope.ConnectedScreen(
         ) {
             ShareButton(
                 icon = if (isSilentMode) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                label = if (isSilentMode) "Silent" else "Audio",
+                label = "Silent",
                 isActive = isSilentMode,
                 onClick = onToggleSilentMode,
                 modifier = Modifier.weight(1f)
             )
             ShareButton(
                 icon = if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                label = if (isMicMuted) "Muted" else "Mic",
+                label = "Mute",
                 isActive = isMicMuted,
                 onClick = onToggleMicMute,
                 modifier = Modifier.weight(1f)
@@ -1287,7 +1313,7 @@ private fun ColumnScope.ConnectedScreen(
         // Third row: Loudspeaker
         ShareButton(
             icon = if (isLoudspeakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk,
-            label = if (isLoudspeakerOn) "Speaker" else "Earpiece",
+            label = "Loudspeaker",
             isActive = isLoudspeakerOn,
             onClick = onToggleLoudspeaker,
             modifier = Modifier.fillMaxWidth()
@@ -1295,30 +1321,38 @@ private fun ColumnScope.ConnectedScreen(
     }
     
     // Info text
-    Spacer(modifier = Modifier.height(12.dp))
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-        ),
-        shape = RoundedCornerShape(10.dp)
+    Spacer(modifier = Modifier.height(14.dp))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = when {
+                    screenShareActive -> Color(0xFF8B5CF6).copy(alpha = 0.1f)
+                    isSilentMode || isMicMuted -> Color(0xFFF59E0B).copy(alpha = 0.1f)
+                    else -> Color(0xFF6366F1).copy(alpha = 0.08f)
+                },
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(12.dp)
     ) {
         Text(
             text = when {
-                screenShareActive && isHdMode -> "📺 HD screen sharing active"
-                screenShareActive -> "📺 Screen sharing active"
-                isSilentMode && isMicMuted -> "🔇 Silent & muted"
-                isSilentMode -> "🔇 Silent mode active"
-                isMicMuted -> "🎤 Microphone muted"
-                else -> "Ready to share"
+                screenShareActive && isHdMode -> "✨ HD Sharing Active"
+                screenShareActive -> "🎬 Sharing Active"
+                isSilentMode && isMicMuted -> "🔇 Silent & Muted"
+                isSilentMode -> "🔇 Silent Mode"
+                isMicMuted -> "🎤 Mic Muted"
+                else -> "⚡ Ready to Share"
             },
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontWeight = FontWeight.Bold,
+            color = when {
+                screenShareActive -> Color(0xFF8B5CF6)
+                isSilentMode || isMicMuted -> Color(0xFFF59E0B)
+                else -> Color(0xFF6366F1)
+            }
         )
     }
     
@@ -1329,15 +1363,18 @@ private fun ColumnScope.ConnectedScreen(
     // Disconnect button - always visible at bottom
     Button(
         onClick = onDisconnect,
-        modifier = Modifier.fillMaxWidth().height(44.dp),
+        modifier = Modifier.fillMaxWidth().height(52.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.error
+            containerColor = Color(0xFFEF4444)
         ),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(14.dp),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 4.dp
+        )
     ) {
-        Icon(Icons.Default.CallEnd, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text("Disconnect", fontWeight = FontWeight.Medium)
+        Icon(Icons.Default.CallEnd, contentDescription = null, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(10.dp))
+        Text("End Call", fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 }
 
@@ -1352,36 +1389,39 @@ private fun ShareButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(44.dp),
-        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.height(52.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = when {
             isPremium && isActive -> ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFFFD700),
-                contentColor = Color(0xFF1E293B)
+                containerColor = Color(0xFFFBBF24),
+                contentColor = Color(0xFF1F2937)
             )
             isPremium -> ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                containerColor = Color(0xFF1F2937),
                 contentColor = Color(0xFFFBBF24)
             )
             isActive -> ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
+                containerColor = Color(0xFF8B5CF6)
             )
             else -> ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                containerColor = Color(0xFF1F2937),
+                contentColor = Color(0xFF9CA3AF)
             )
-        }
+        },
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = if (isActive) 6.dp else 2.dp
+        )
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(20.dp)
         )
-        Spacer(modifier = Modifier.width(6.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Medium
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }

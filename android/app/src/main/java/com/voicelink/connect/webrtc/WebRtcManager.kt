@@ -737,32 +737,39 @@ class WebRtcManager(
     
     private fun handleParticipantChanges(participants: List<FirebaseSignaling.Participant>) {
         val myUserId = signaling.getCurrentUserId()
-        val activeParticipants = participants.filter { it.status == "joined" && it.userId != myUserId }
+        
+        // Include ALL joined participants (including self) for accurate count
+        val allActiveParticipants = participants.filter { it.status == "joined" }
+        val otherActiveParticipants = allActiveParticipants.filter { it.userId != myUserId }
+        
         val previousActive = previousParticipants.filter { it.status == "joined" && it.userId != myUserId }
         
         // Detect new joins
-        val newJoins = activeParticipants.filter { participant ->
+        val newJoins = otherActiveParticipants.filter { participant ->
             previousActive.none { it.userId == participant.userId }
         }
         
         // Detect leaves
         val newLeaves = previousActive.filter { participant ->
-            activeParticipants.none { it.userId == participant.userId }
+            otherActiveParticipants.none { it.userId == participant.userId }
         }
         
-        // Emit events
+        // Emit events for joins/leaves
         newJoins.forEach { participant ->
             _participantEvent.value = ParticipantEvent.Joined(participant.userId)
+            Log.d(TAG, "Participant joined: ${participant.userId}")
         }
         
         newLeaves.forEach { participant ->
             _participantEvent.value = ParticipantEvent.Left(participant.userId)
+            Log.d(TAG, "Participant left: ${participant.userId}")
         }
         
         previousParticipants = participants
-        _participants.value = activeParticipants
+        // Store OTHER participants (not including self) for the UI to show
+        _participants.value = otherActiveParticipants
         
-        Log.d(TAG, "Participants updated: ${activeParticipants.size} active participants")
+        Log.d(TAG, "Participants updated: total=${allActiveParticipants.size}, others=${otherActiveParticipants.size}")
     }
 
     fun joinRoom(roomId: String, onJoined: (Boolean) -> Unit) {
