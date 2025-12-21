@@ -201,8 +201,10 @@ fun RoomScreen(
     // Handle participant events
     LaunchedEffect(participantEvent) {
         participantEvent?.let { event ->
+            Log.d("RoomScreen", "Received participant event: $event")
             when (event) {
                 is WebRtcManager.ParticipantEvent.Joined -> {
+                    Log.d("RoomScreen", "Showing join notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant joined",
                         type = NotificationType.JOIN,
@@ -212,6 +214,7 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.Left -> {
+                    Log.d("RoomScreen", "Showing leave notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant left",
                         type = NotificationType.LEAVE,
@@ -221,6 +224,7 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.StartedSharing -> {
+                    Log.d("RoomScreen", "Showing screen share start notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant started sharing screen",
                         type = NotificationType.SCREEN_SHARE_START,
@@ -230,6 +234,7 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.StoppedSharing -> {
+                    Log.d("RoomScreen", "Showing screen share stop notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant stopped sharing screen",
                         type = NotificationType.SCREEN_SHARE_STOP,
