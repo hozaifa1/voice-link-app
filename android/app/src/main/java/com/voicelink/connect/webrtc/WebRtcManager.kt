@@ -190,20 +190,18 @@ class WebRtcManager(
                 ) {
                     val bytesInBuffer = audioBuffer.remaining()
                     
-                    // Check if system audio is ACTIVELY PLAYING (not just initialized)
-                    // This ensures we only bypass noise cancellation when screen audio is actually transmitting
-                    val systemAudioPlaying = systemAudioMixer?.isSystemAudioPlaying?.value == true
+                    // Check if system audio is active
+                    val systemAudioActive = systemAudioMixer?.isActive?.value == true
                     
-                    if (systemAudioPlaying) {
-                        // System audio is actively playing - transmit screen audio without noise cancellation
-                        // This preserves system sounds (music, games, etc.) with full quality
+                    if (systemAudioActive) {
+                        // Process system audio - uses priority-based switching:
+                        // - When system audio is playing: transmit system audio only
+                        // - When system audio is silent: transmit mic audio only
                         systemAudioMixer?.processAudioBuffer(audioBuffer, bytesInBuffer, channelCount, sampleRate)
-                        Log.v(TAG, "[AudioPath] Transmitting system audio (screen share)")
                     } else {
-                        // Apply voice noise suppression to microphone audio for both users
-                        // This runs on EVERY user (creator and joiner) before sending audio to remote peer
+                        // Apply voice noise suppression to microphone audio
+                        // This provides WhatsApp-like noise cancellation for voice
                         voiceNoiseSuppressor.processAudio(audioBuffer, bytesInBuffer, channelCount, sampleRate)
-                        Log.v(TAG, "[AudioPath] Applying noise cancellation to microphone audio")
                     }
                 }
             })
