@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.util.Log
+import com.voicelink.connect.audio.HornSoundPlayer
 import com.voicelink.connect.audio.SystemAudioMixer
 import com.voicelink.connect.audio.VoiceNoiseSuppressor
 import kotlinx.coroutines.CoroutineScope
@@ -131,6 +132,9 @@ class WebRtcManager(
     // Voice noise suppressor for microphone audio
     private val voiceNoiseSuppressor = VoiceNoiseSuppressor()
     
+    // Horn sound player for make noise feature
+    private val hornSoundPlayer = HornSoundPlayer()
+    
     // Audio device module with callback for mixing
     private var audioDeviceModule: JavaAudioDeviceModule? = null
     
@@ -192,7 +196,13 @@ class WebRtcManager(
                 ) {
                     val bytesInBuffer = audioBuffer.remaining()
                     
-                    // Check if system audio is active
+                    // Priority 1: Horn sound (highest priority - overrides everything)
+                    val hornProcessed = hornSoundPlayer.processAudioBuffer(audioBuffer, bytesInBuffer, channelCount, sampleRate)
+                    if (hornProcessed) {
+                        return
+                    }
+                    
+                    // Priority 2: System audio
                     val systemAudioActive = systemAudioMixer?.isActive?.value == true
                     
                     if (systemAudioActive) {
@@ -201,7 +211,7 @@ class WebRtcManager(
                         // - When system audio is silent: transmit mic audio only
                         systemAudioMixer?.processAudioBuffer(audioBuffer, bytesInBuffer, channelCount, sampleRate)
                     } else {
-                        // Apply voice noise suppression to microphone audio
+                        // Priority 3: Apply voice noise suppression to microphone audio
                         // This provides WhatsApp-like noise cancellation for voice
                         voiceNoiseSuppressor.processAudio(audioBuffer, bytesInBuffer, channelCount, sampleRate)
                     }
@@ -357,6 +367,15 @@ class WebRtcManager(
         _isLoudspeakerOn.value = !_isLoudspeakerOn.value
         audioManager?.isSpeakerphoneOn = _isLoudspeakerOn.value
         Log.d(TAG, "Loudspeaker: ${_isLoudspeakerOn.value}")
+    }
+    
+    /**
+     * Play horn sound that will be transmitted to the other side.
+     * Works regardless of current audio state (system audio, mic, etc).
+     */
+    fun playHornSound() {
+        hornSoundPlayer.playHornSound()
+        Log.d(TAG, "Horn sound triggered")
     }
 
     /**
@@ -1010,20 +1029,14 @@ class WebRtcManager(
     private fun handleRemoteScreenShareStatus(isSharing: Boolean, sharerId: String) {
         val myId = signaling.getCurrentUserId()
         
-        Log.d(TAG, "handleRemoteScreenShareStatus: isSharing=$isSharing, sharerId=$sharerId, myId=$myId")
-        
         // Only process if this is from the remote peer
         if (sharerId != myId) {
             // Emit notification event
             if (isSharing) {
-                Log.d(TAG, "Emitting StartedSharing event for $sharerId")
                 _participantEvent.value = ParticipantEvent.StartedSharing(sharerId)
             } else {
-                Log.d(TAG, "Emitting StoppedSharing event for $sharerId")
                 _participantEvent.value = ParticipantEvent.StoppedSharing(sharerId)
             }
-        } else {
-            Log.d(TAG, "Skipping notification - this is from myself")
         }
         
         _remoteScreenShareActive.value = isSharing
@@ -1385,6 +1398,8 @@ class WebRtcManager(
         
         audioDeviceModule?.release()
         audioDeviceModule = null
+        
+        hornSoundPlayer.release()
         
         peerConnectionFactory?.dispose()
         peerConnectionFactory = null

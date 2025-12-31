@@ -201,10 +201,8 @@ fun RoomScreen(
     // Handle participant events
     LaunchedEffect(participantEvent) {
         participantEvent?.let { event ->
-            Log.d("RoomScreen", "Received participant event: $event")
             when (event) {
                 is WebRtcManager.ParticipantEvent.Joined -> {
-                    Log.d("RoomScreen", "Showing join notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant joined",
                         type = NotificationType.JOIN,
@@ -214,7 +212,6 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.Left -> {
-                    Log.d("RoomScreen", "Showing leave notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant left",
                         type = NotificationType.LEAVE,
@@ -224,7 +221,6 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.StartedSharing -> {
-                    Log.d("RoomScreen", "Showing screen share start notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant started sharing screen",
                         type = NotificationType.SCREEN_SHARE_START,
@@ -234,7 +230,6 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.StoppedSharing -> {
-                    Log.d("RoomScreen", "Showing screen share stop notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant stopped sharing screen",
                         type = NotificationType.SCREEN_SHARE_STOP,
@@ -594,6 +589,7 @@ fun RoomScreen(
                         onToggleSilentMode = { webRtcManager.toggleSilentMode() },
                         onToggleMicMute = { webRtcManager.toggleMicMute() },
                         onToggleLoudspeaker = { webRtcManager.toggleLoudspeaker() },
+                        onMakeNoise = { webRtcManager.playHornSound() },
                         onDisconnect = {
                             AudioCaptureService.stopCapture(context)
                             WebRtcService.stop(context)
@@ -1079,6 +1075,7 @@ private fun ColumnScope.ConnectedScreen(
     onToggleSilentMode: () -> Unit,
     onToggleMicMute: () -> Unit,
     onToggleLoudspeaker: () -> Unit,
+    onMakeNoise: () -> Unit,
     onDisconnect: () -> Unit
 ) {
     // Fullscreen is now handled at the RoomScreen level, outside of Scaffold
@@ -1315,14 +1312,26 @@ private fun ColumnScope.ConnectedScreen(
             )
         }
         
-        // Third row: Loudspeaker
-        ShareButton(
-            icon = if (isLoudspeakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk,
-            label = "Loudspeaker",
-            isActive = isLoudspeakerOn,
-            onClick = onToggleLoudspeaker,
-            modifier = Modifier.fillMaxWidth()
-        )
+        // Third row: Loudspeaker and Make Noise
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            ShareButton(
+                icon = if (isLoudspeakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk,
+                label = "Speaker",
+                isActive = isLoudspeakerOn,
+                onClick = onToggleLoudspeaker,
+                modifier = Modifier.weight(1f)
+            )
+            ShareButton(
+                icon = Icons.Default.Notifications,
+                label = "Noise",
+                isActive = false,
+                onClick = onMakeNoise,
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
     
     // Info text
@@ -1450,7 +1459,6 @@ private fun RemoteVideoView(
                     try {
                         videoTrack.removeSink(renderer)
                         renderer.release()
-                        Log.d("RemoteVideoView", "Renderer released for track: ${videoTrack.id()}")
                     } catch (e: Exception) {
                         Log.e("RemoteVideoView", "Error releasing renderer", e)
                     }
@@ -1461,17 +1469,15 @@ private fun RemoteVideoView(
         AndroidView(
             modifier = modifier,
             factory = { context ->
-                Log.d("RemoteVideoView", "Creating new renderer for track: ${videoTrack.id()}")
                 SurfaceViewRenderer(context).apply {
                     init(eglBase.eglBaseContext, null)
                     setScalingType(scalingType)
                     setEnableHardwareScaler(true)
                     setMirror(false)
                     surfaceViewRenderer = this
-                    
+
                     // Add sink to the video track
                     videoTrack.addSink(this)
-                    Log.d("RemoteVideoView", "Video sink added for track: ${videoTrack.id()}")
                 }
             },
             update = { renderer ->
