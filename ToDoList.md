@@ -29,18 +29,18 @@ Payment is intentionally **deferred until after MVP feasibility is proven**.
     - handle interruptions
   - avoid storing audio to disk
 
-- [ ] **Step 5 — [Coding] Prove WebRTC feasibility on same Wi‑Fi (no paid TURN)** (Appendix A for WebRTC stack; Appendix F for STUN/signaling; Appendix H Week 1–3 prompts; pacing in Appendix B)
+- [x] **Step 5 — [Coding] Prove WebRTC feasibility on same Wi‑Fi (no paid TURN)** (Appendix A for WebRTC stack; Appendix F for STUN/signaling; Appendix H Week 1–3 prompts; pacing in Appendix B)
   - Use public STUN (example: `stun:stun.l.google.com:19302`)
   - Implement signaling via Firebase
   - Test device A ↔ device B on the same network
 
-- [ ] **Step 6 — [Human] Decide if you need TURN yet (only if remote tests fail)** (Appendix F TURN options; cost context in Appendix C; pacing in Appendix B)
+- [x] **Step 6 — [Human] Decide if you need TURN yet (only if remote tests fail)** (Appendix F TURN options; cost context in Appendix C; pacing in Appendix B)
   - If same‑Wi‑Fi works but remote networks fail, you need TURN.
   - Choose:
     - Managed TURN provider (paid)
     - Self-host coturn (paid VPS + usually paid domain)
 
-- [ ] **Step 7 — [Coding] Add TURN support (only after Step 6)** (Appendix F TURN setup; secrets/env in Appendix G; pacing in Appendix B)
+- [x] **Step 7 — [Coding] Add TURN support (only after Step 6)** (Appendix F TURN setup; secrets/env in Appendix G; pacing in Appendix B)
   - Add ICE server config support
   - If you use TURN REST credentials, implement credential minting on backend
 
