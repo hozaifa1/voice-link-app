@@ -499,14 +499,9 @@ class FirebaseSignaling {
                     val sharerId = shareData["sharerId"] as? String ?: ""
                     val version = (shareData["version"] as? Long) ?: 0
                     
-                    Log.d(TAG, "Screen share: version=$version, lastVersion=$lastScreenShareVersion, sharing=$isSharing, by=$sharerId")
-                    
                     if (version > lastScreenShareVersion) {
                         lastScreenShareVersion = version
-                        Log.d(TAG, "Calling screen share callback: sharing=$isSharing, by=$sharerId")
                         callback(isSharing, sharerId)
-                    } else {
-                        Log.d(TAG, "Skipping screen share callback - version not newer")
                     }
                 }
             }
@@ -534,8 +529,6 @@ class FirebaseSignaling {
                 val participantsData = snapshot?.get("participants") as? Map<*, *>
                 val version = (snapshot?.get("participantsVersion") as? Long) ?: 0
                 
-                Log.d(TAG, "Participant snapshot: version=$version, lastVersion=$lastParticipantsVersion, size=${participantsData?.size}")
-                
                 if (participantsData != null && version >= lastParticipantsVersion) {
                     lastParticipantsVersion = version
                     val participants = participantsData.map { (userId, data) ->
@@ -546,7 +539,6 @@ class FirebaseSignaling {
                             status = status
                         )
                     }
-                    Log.d(TAG, "Participants updated: ${participants.size} total, calling callback")
                     callback(participants)
                 }
             }
