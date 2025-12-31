@@ -39,9 +39,9 @@ fun WelcomeScreen(
     )
     
     LaunchedEffect(Unit) {
-        delay(200)
+        delay(100)
         visible = true
-        delay(2500)
+        delay(1800)
         showButton = true
     }
     
@@ -169,9 +169,8 @@ fun WelcomeScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             color = Color.White,
                             textAlign = TextAlign.Center,
-                            lineHeight = 24.sp
+                            lineHeight = 26.sp
                         )
-                        
                         Spacer(modifier = Modifier.height(16.dp))
                     }
                 }

@@ -1010,14 +1010,20 @@ class WebRtcManager(
     private fun handleRemoteScreenShareStatus(isSharing: Boolean, sharerId: String) {
         val myId = signaling.getCurrentUserId()
         
+        Log.d(TAG, "handleRemoteScreenShareStatus: isSharing=$isSharing, sharerId=$sharerId, myId=$myId")
+        
         // Only process if this is from the remote peer
         if (sharerId != myId) {
             // Emit notification event
             if (isSharing) {
+                Log.d(TAG, "Emitting StartedSharing event for $sharerId")
                 _participantEvent.value = ParticipantEvent.StartedSharing(sharerId)
             } else {
+                Log.d(TAG, "Emitting StoppedSharing event for $sharerId")
                 _participantEvent.value = ParticipantEvent.StoppedSharing(sharerId)
             }
+        } else {
+            Log.d(TAG, "Skipping notification - this is from myself")
         }
         
         _remoteScreenShareActive.value = isSharing
