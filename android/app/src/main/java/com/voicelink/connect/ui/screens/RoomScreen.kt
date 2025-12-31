@@ -201,8 +201,10 @@ fun RoomScreen(
     // Handle participant events
     LaunchedEffect(participantEvent) {
         participantEvent?.let { event ->
+            Log.d("RoomScreen", "Received participant event: $event")
             when (event) {
                 is WebRtcManager.ParticipantEvent.Joined -> {
+                    Log.d("RoomScreen", "Showing join notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant joined",
                         type = NotificationType.JOIN,
@@ -212,6 +214,7 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.Left -> {
+                    Log.d("RoomScreen", "Showing leave notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant left",
                         type = NotificationType.LEAVE,
@@ -221,6 +224,7 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.StartedSharing -> {
+                    Log.d("RoomScreen", "Showing screen share start notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant started sharing screen",
                         type = NotificationType.SCREEN_SHARE_START,
@@ -230,6 +234,7 @@ fun RoomScreen(
                     participantNotification = null
                 }
                 is WebRtcManager.ParticipantEvent.StoppedSharing -> {
+                    Log.d("RoomScreen", "Showing screen share stop notification")
                     participantNotification = ParticipantNotification(
                         message = "Participant stopped sharing screen",
                         type = NotificationType.SCREEN_SHARE_STOP,
@@ -1459,6 +1464,7 @@ private fun RemoteVideoView(
                     try {
                         videoTrack.removeSink(renderer)
                         renderer.release()
+                        Log.d("RemoteVideoView", "Renderer released for track: ${videoTrack.id()}")
                     } catch (e: Exception) {
                         Log.e("RemoteVideoView", "Error releasing renderer", e)
                     }
@@ -1469,15 +1475,17 @@ private fun RemoteVideoView(
         AndroidView(
             modifier = modifier,
             factory = { context ->
+                Log.d("RemoteVideoView", "Creating new renderer for track: ${videoTrack.id()}")
                 SurfaceViewRenderer(context).apply {
                     init(eglBase.eglBaseContext, null)
                     setScalingType(scalingType)
                     setEnableHardwareScaler(true)
                     setMirror(false)
                     surfaceViewRenderer = this
-
+                    
                     // Add sink to the video track
                     videoTrack.addSink(this)
+                    Log.d("RemoteVideoView", "Video sink added for track: ${videoTrack.id()}")
                 }
             },
             update = { renderer ->

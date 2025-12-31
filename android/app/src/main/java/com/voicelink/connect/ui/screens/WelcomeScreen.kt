@@ -171,6 +171,7 @@ fun WelcomeScreen(
                             textAlign = TextAlign.Center,
                             lineHeight = 26.sp
                         )
+                        
                         Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
