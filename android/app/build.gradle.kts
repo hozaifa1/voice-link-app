@@ -46,7 +46,7 @@ android {
             firebaseAppDistribution {
                 artifactType = "APK"
                 // Add your tester emails here (comma-separated)
-                testers = "fariha.fhf@gmail.com, khadiza.perveen1456@gmail.com, yusharayan67@gmail.com, 20hozaifa02@gmail.com"
+                testers = "fariha.fhf@gmail.com, khadiza.perveen1456@gmail.com, yusharayan67@gmail.com, 20hozaifa02@gmail.com, aylinjahananj@gmail.com, smazmainh@gmail.com"
                 // Or use a file: testersFile = "testers.txt"
             }
         }
@@ -57,7 +57,7 @@ android {
             // Firebase App Distribution for debug builds
             firebaseAppDistribution {
                 artifactType = "APK"
-                testers = "fariha.fhf@gmail.com, khadiza.perveen1456@gmail.com, yusharayan67@gmail.com, 20hozaifa02@gmail.com"
+                testers = "fariha.fhf@gmail.com, khadiza.perveen1456@gmail.com, yusharayan67@gmail.com, 20hozaifa02@gmail.com, aylinjahananj@gmail.com, smazmainh@gmail.com"
             }
         }
     }

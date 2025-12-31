@@ -173,15 +173,6 @@ fun WelcomeScreen(
                         )
                         
                         Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            FeatureChip("📹 Video")
-                            FeatureChip("🎵 Audio")
-                            FeatureChip("🎤 Voice")
-                        }
                     }
                 }
             }
@@ -220,18 +211,3 @@ fun WelcomeScreen(
     }
 }
 
-@Composable
-private fun FeatureChip(text: String) {
-    Surface(
-        color = Color.White.copy(alpha = 0.2f),
-        shape = MaterialTheme.shapes.small
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
