@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">VoiceLink Connect</string>
+    <string name="app_name">StreamSync</string>
     <string name="notification_channel_name">Audio Sharing</string>
     <string name="notification_channel_description">Notifications for audio sharing service</string>
     <string name="notification_title">Audio Sharing Active</string>

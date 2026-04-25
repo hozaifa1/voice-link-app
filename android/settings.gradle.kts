@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VoiceLinkConnect"
+rootProject.name = "StreamSync"
 include(":app")

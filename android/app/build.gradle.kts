@@ -8,17 +8,45 @@ plugins {
 }
 
 android {
-    namespace = "com.voicelink.connect"
+    namespace = "com.streamsync.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.voicelink.connect"
+        applicationId = "com.streamsync.app"
         minSdk = 29
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Ship only the ABIs we actually support — drops ~half of native binaries from the APK.
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+        }
+
+        // Single-locale builds — drops translated string tables from libraries we depend on.
+        resourceConfigurations.addAll(listOf("en"))
+
+        // Vector drawables only; no PNG generation at build time.
+        vectorDrawables {
+            useSupportLibrary = true
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "META-INF/*.kotlin_module",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/*.version",
+                "**/kotlin-tooling-metadata.json",
+                "kotlin/**"
+            )
+        }
     }
 
     // ABI splits disabled - Firebase App Distribution doesn't support multiple APKs
@@ -33,6 +61,30 @@ android {
     //     }
     // }
 
+    signingConfigs {
+        create("release") {
+            // CI provides these via secrets; locally, set them in ~/.gradle/gradle.properties
+            // or as environment variables (KEYSTORE_PATH, KEY_ALIAS, KEY_PASSWORD, STORE_PASSWORD).
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+                ?: (project.findProperty("KEYSTORE_PATH") as String?)
+            val alias = System.getenv("KEY_ALIAS")
+                ?: (project.findProperty("KEY_ALIAS") as String?)
+            val keyPwd = System.getenv("KEY_PASSWORD")
+                ?: (project.findProperty("KEY_PASSWORD") as String?)
+            val storePwd = System.getenv("STORE_PASSWORD")
+                ?: (project.findProperty("STORE_PASSWORD") as String?)
+
+            if (!keystorePath.isNullOrBlank() && !alias.isNullOrBlank()
+                && !keyPwd.isNullOrBlank() && !storePwd.isNullOrBlank()
+            ) {
+                storeFile = file(keystorePath)
+                keyAlias = alias
+                keyPassword = keyPwd
+                storePassword = storePwd
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -41,6 +93,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+
+            // Apply release signing only when credentials are available;
+            // otherwise the build falls back to debug signing for local convenience.
+            signingConfigs.getByName("release").storeFile?.let {
+                signingConfig = signingConfigs.getByName("release")
+            }
             
             // Firebase App Distribution for release builds
             firebaseAppDistribution {

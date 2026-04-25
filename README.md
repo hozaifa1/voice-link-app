@@ -1,4 +1,4 @@
-# VoiceLink Connect
+# StreamSync
 
 > **Ultra-low-latency Android watch-party audio bridge** built with Jetpack Compose, Firebase signaling, and a hybrid WebRTC + MediaProjection audio pipeline.
 
@@ -6,7 +6,7 @@
 
 ## 📌 Executive Overview
 
-VoiceLink Connect is an Android 10+ (API 29) application that lets two peers join a room and share:
+StreamSync is an Android 10+ (API 29) application that lets two peers join a room and share:
 
 - **Internal / system audio** (movie, game, browser tab) captured via `AudioPlaybackCapture`.
 - **Live microphone audio** with WhatsApp-grade noise suppression.

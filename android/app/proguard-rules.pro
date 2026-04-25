@@ -17,3 +17,21 @@
 -keepclassmembers class kotlinx.coroutines.** {
     volatile <fields>;
 }
+
+# Firebase Firestore — needs reflection on data classes used as @DocumentId / serialization targets.
+-keepclassmembers class com.streamsync.app.webrtc.** {
+    *;
+}
+-keepattributes Signature, *Annotation*, EnclosingMethod, InnerClasses
+
+# Firebase
+-keep class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.firebase.**
+
+# Strip verbose log calls from release builds — saves space and avoids leaking internals.
+-assumenosideeffects class android.util.Log {
+    public static *** v(...);
+    public static *** d(...);
+    public static *** i(...);
+}
