@@ -214,7 +214,7 @@ fun RoomScreen(
             participantNotification = ParticipantNotification(
                 message = message,
                 type = type,
-                timestamp = event.timestamp
+                timestamp = System.currentTimeMillis()
             )
         }
     }
